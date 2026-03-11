@@ -38,7 +38,7 @@ cargo-proxy-registry \
 ```
 
 Options:
-- `--port` / `-p`: Port for the registry server (default: 3000)
+- `--port` / `-p`: Port for the registry server (default: 8080)
 - `--host` / `-H`: Host to bind to (default: 0.0.0.0)
 - `--registry-path` / `-r`: Directory to store published crates and index (default: ./local-registry)
 - `--base-url` / `-b`: Base URL for the registry (default: http://{host}:{port})
