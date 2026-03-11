@@ -1,8 +1,9 @@
 mod common;
 
-use common::ProxyTestHelper;
 use std::fs;
 use std::path::PathBuf;
+
+use common::ProxyTestHelper;
 
 /// Test that validation rejects crates missing required metadata (enabled by default)
 #[test]
@@ -28,8 +29,7 @@ edition = "2021"
     .expect("Failed to write Cargo.toml");
 
     // Create a minimal lib.rs
-    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n")
-        .expect("Failed to write lib.rs");
+    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
 
     // Start proxy (validation is on by default)
     let proxy = ProxyTestHelper::new("strict-incomplete");
@@ -89,8 +89,7 @@ license = "MIT"
     .expect("Failed to write Cargo.toml");
 
     // Create a minimal lib.rs
-    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n")
-        .expect("Failed to write lib.rs");
+    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
 
     // Start proxy (validation is on by default)
     let proxy = ProxyTestHelper::new("strict-complete");
@@ -156,8 +155,7 @@ keywords = ["one", "two", "three", "four", "five", "six"]
     .expect("Failed to write Cargo.toml");
 
     // Create a minimal lib.rs
-    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n")
-        .expect("Failed to write lib.rs");
+    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
 
     // Start proxy (validation is on by default)
     let proxy = ProxyTestHelper::new("strict-keywords");
@@ -215,8 +213,7 @@ edition = "2021"
     .expect("Failed to write Cargo.toml");
 
     // Create a minimal lib.rs
-    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n")
-        .expect("Failed to write lib.rs");
+    fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
 
     // Start proxy with --permissive-publishing to skip validation
     let proxy = ProxyTestHelper::with_args("permissive", &["--permissive-publishing"]);

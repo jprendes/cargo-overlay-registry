@@ -1,7 +1,9 @@
+use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
+
 use super::{Registry, RegistryError};
 use crate::types::{IndexDependency, IndexEntry, PublishMetadata};
-use sha2::{Digest, Sha256};
-use std::path::PathBuf;
 
 /// A local filesystem-based registry
 pub struct LocalRegistry {

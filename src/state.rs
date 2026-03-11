@@ -1,6 +1,8 @@
-use crate::registry::{LocalRegistry, OverlayRegistry, RemoteRegistry};
-use reqwest::Client;
 use std::path::PathBuf;
+
+use reqwest::Client;
+
+use crate::registry::{LocalRegistry, OverlayRegistry, RemoteRegistry};
 
 /// Type alias for the overlay registry used by the proxy
 pub type ProxyRegistry = OverlayRegistry<LocalRegistry, RemoteRegistry>;

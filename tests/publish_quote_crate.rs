@@ -1,8 +1,9 @@
 mod common;
 
-use common::ProxyTestHelper;
 use std::fs;
 use std::path::PathBuf;
+
+use common::ProxyTestHelper;
 
 #[test]
 fn test_publish_quote_crate() {

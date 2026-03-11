@@ -1,5 +1,6 @@
-use clap::Parser;
 use std::path::PathBuf;
+
+use clap::Parser;
 
 /// Cargo registry proxy - proxies crates.io and supports local publishing
 #[derive(Parser, Debug)]

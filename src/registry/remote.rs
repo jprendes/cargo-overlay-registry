@@ -1,6 +1,7 @@
+use reqwest::Client;
+
 use super::{Registry, RegistryError};
 use crate::types::IndexEntry;
-use reqwest::Client;
 
 /// A remote registry that fetches from an upstream like crates.io
 pub struct RemoteRegistry {

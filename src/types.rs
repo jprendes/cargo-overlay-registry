@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 
 /// Publish request metadata (from cargo)
 #[derive(Deserialize, Debug)]
@@ -71,7 +72,10 @@ impl PublishMetadata {
                     kw.len()
                 ));
             }
-            if !kw.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            if !kw
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
                 errors.push(format!(
                     "keyword `{}` contains invalid characters (only ASCII alphanumeric, `-`, `_` allowed)",
                     kw

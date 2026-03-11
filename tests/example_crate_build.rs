@@ -1,8 +1,9 @@
 mod common;
 
-use common::ProxyTestHelper;
 use std::path::PathBuf;
 use std::process::Command;
+
+use common::ProxyTestHelper;
 
 #[test]
 fn test_example_crate_build() {

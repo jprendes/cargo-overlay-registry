@@ -2,12 +2,13 @@ mod local;
 mod overlay;
 mod remote;
 
+use std::fmt;
+
 pub use local::LocalRegistry;
 pub use overlay::OverlayRegistry;
 pub use remote::RemoteRegistry;
 
 use crate::types::{IndexEntry, PublishMetadata};
-use std::fmt;
 
 /// Error type for registry operations
 #[derive(Debug)]
@@ -85,4 +86,3 @@ pub trait Registry: Send + Sync {
         crate_data: &[u8],
     ) -> impl std::future::Future<Output = Result<String, RegistryError>> + Send;
 }
-

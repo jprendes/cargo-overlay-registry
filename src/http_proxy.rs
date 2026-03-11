@@ -1,10 +1,12 @@
-use crate::state::MitmCa;
+use std::sync::Arc;
+
 use log::{debug, error, info};
 use rustls::ServerConfig;
-use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
+
+use crate::state::MitmCa;
 
 /// Run the HTTP proxy server
 pub async fn run_http_proxy(
@@ -174,10 +176,7 @@ async fn handle_connect_tunnel(
     });
 
     if should_intercept {
-        info!(
-            "HTTP proxy CONNECT MITM interception for {}:{}",
-            host, port
-        );
+        info!("HTTP proxy CONNECT MITM interception for {}:{}", host, port);
         handle_connect_mitm(stream, host, main_proxy_host, main_proxy_port, mitm_ca).await
     } else {
         info!("HTTP proxy CONNECT tunnel to {}:{}", host, port);
@@ -199,8 +198,7 @@ async fn handle_connect_mitm(
     let (cert_pem, key_pem) = mitm_ca.sign_domain_cert(host)?;
 
     // Parse the certificate and key
-    let certs =
-        rustls_pemfile::certs(&mut cert_pem.as_slice()).collect::<Result<Vec<_>, _>>()?;
+    let certs = rustls_pemfile::certs(&mut cert_pem.as_slice()).collect::<Result<Vec<_>, _>>()?;
     let key =
         rustls_pemfile::private_key(&mut key_pem.as_slice())?.ok_or("No private key found")?;
 
@@ -336,8 +334,7 @@ async fn handle_connect_mitm(
             if let Some(colon_pos) = header.find(':') {
                 let name = header[..colon_pos].trim();
                 let value = header[colon_pos + 1..].trim();
-                if !["host", "connection", "content-length"]
-                    .contains(&name.to_lowercase().as_str())
+                if !["host", "connection", "content-length"].contains(&name.to_lowercase().as_str())
                 {
                     request = request.header(name, value);
                 }
@@ -498,11 +495,9 @@ where
     // Check if this is an upstream registry URL and rewrite it
     let should_rewrite = url::Url::parse(&url).ok().is_some_and(|parsed| {
         parsed.host_str().is_some_and(|url_host| {
-            upstream_hosts
-                .iter()
-                .any(|upstream_host| {
-                    url_host == upstream_host || url_host.ends_with(&format!(".{}", upstream_host))
-                })
+            upstream_hosts.iter().any(|upstream_host| {
+                url_host == upstream_host || url_host.ends_with(&format!(".{}", upstream_host))
+            })
         })
     });
 

@@ -6,24 +6,22 @@ mod state;
 mod tls;
 mod types;
 
-use axum::{
-    routing::{get, put},
-    Router,
-};
+use std::sync::Arc;
+
+use axum::routing::{get, put};
+use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
-use log::info;
-use std::sync::Arc;
-use tokio::fs;
-
 use cli::Args;
 use endpoints::{
     handle_api_download, handle_api_publish, handle_api_search, handle_config, handle_index_1char,
     handle_index_2char, handle_index_3char, handle_index_4plus,
 };
 use http_proxy::run_http_proxy;
+use log::info;
 use state::{MitmCa, ProxyState};
 use tls::generate_self_signed_cert;
+use tokio::fs;
 
 #[tokio::main]
 async fn main() {
@@ -158,8 +156,8 @@ async fn main() {
                 .expect("Failed to load TLS certificate/key")
         } else {
             info!("Generating self-signed TLS certificate");
-            let (cert_pem, key_pem) =
-                generate_self_signed_cert(&args.host).expect("Failed to generate self-signed certificate");
+            let (cert_pem, key_pem) = generate_self_signed_cert(&args.host)
+                .expect("Failed to generate self-signed certificate");
             RustlsConfig::from_pem(cert_pem, key_pem)
                 .await
                 .expect("Failed to create TLS config from self-signed cert")

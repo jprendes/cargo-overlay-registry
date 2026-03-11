@@ -1,16 +1,16 @@
+use std::fmt;
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::extract::{Path, State};
+use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
+use log::{error, info, warn};
+
 use crate::registry::{Registry, RegistryError};
 use crate::state::ProxyState;
 use crate::types::{IndexEntry, PublishMetadata, PublishResponse, PublishWarnings, RegistryConfig};
-use axum::{
-    body::Body,
-    extract::{Path, State},
-    http::{header, HeaderMap, Method, StatusCode, Uri},
-    response::{IntoResponse, Response},
-};
-use bytes::Bytes;
-use log::{error, info, warn};
-use std::fmt;
-use std::sync::Arc;
 
 /// Error type for parsing publish requests
 #[derive(Debug)]
@@ -262,10 +262,7 @@ pub async fn handle_api_download(
     State(state): State<Arc<ProxyState>>,
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    info!(
-        "GET /api/v1/crates/{}/{}/download",
-        crate_name, version
-    );
+    info!("GET /api/v1/crates/{}/{}/download", crate_name, version);
 
     match state.registry.download(&crate_name, &version).await {
         Ok(data) => {

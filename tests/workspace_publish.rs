@@ -1,8 +1,9 @@
 mod common;
 
-use common::ProxyTestHelper;
 use std::fs;
 use std::path::PathBuf;
+
+use common::ProxyTestHelper;
 
 #[test]
 fn test_workspace_publish() {
@@ -16,7 +17,14 @@ fn test_workspace_publish() {
     // which fails when test-consumer needs quote v99.0.0 that hasn't been uploaded yet
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--workspace", "--allow-dirty", "--token", "dummy", "--no-verify"])
+        .args([
+            "publish",
+            "--workspace",
+            "--allow-dirty",
+            "--token",
+            "dummy",
+            "--no-verify",
+        ])
         .current_dir(&example_dir)
         .output()
         .expect("Failed to run cargo publish --workspace");
@@ -93,7 +101,10 @@ fn test_workspace_publish() {
         .join("te")
         .join("st")
         .join("test-consumer");
-    assert!(consumer_index.exists(), "test-consumer index file not found");
+    assert!(
+        consumer_index.exists(),
+        "test-consumer index file not found"
+    );
 
     // Verify test-consumer's index entry has quote as a dependency
     let consumer_index_content =

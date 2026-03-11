@@ -1,9 +1,10 @@
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
-use std::sync::OnceLock;
+
 use tempfile::TempDir;
 
 /// Wait for the server to be ready by attempting to connect
