@@ -1,19 +1,18 @@
+use crate::registry::{LocalRegistry, OverlayRegistry, RemoteRegistry};
 use reqwest::Client;
 use std::path::PathBuf;
 
-/// Proxy state containing the HTTP client
+/// Type alias for the overlay registry used by the proxy
+pub type ProxyRegistry = OverlayRegistry<LocalRegistry, RemoteRegistry>;
+
+/// Proxy state containing the registry and HTTP client
 pub struct ProxyState {
+    /// HTTP client for API proxying (search, etc.)
     pub client: Client,
     /// The base URL where this proxy is listening (for config.json rewriting)
     pub proxy_base_url: String,
-    /// Local registry storage path
-    pub local_registry_path: PathBuf,
-    /// Upstream registry sparse index URL
-    pub upstream_index: String,
-    /// Upstream registry API URL
-    pub upstream_api: String,
-    /// Skip crates.io-style metadata validation on publish
-    pub permissive_publishing: bool,
+    /// The overlay registry (local on top of remote)
+    pub registry: ProxyRegistry,
 }
 
 impl ProxyState {
@@ -24,17 +23,23 @@ impl ProxyState {
         upstream_api: String,
         permissive_publishing: bool,
     ) -> Self {
+        let local = LocalRegistry::new(local_registry_path, !permissive_publishing);
+        let remote = RemoteRegistry::new(upstream_index, upstream_api.clone());
+        let registry = OverlayRegistry::new(local, remote);
+
         Self {
             client: Client::builder()
                 .user_agent("cargo-overlay-registry/0.1.0")
                 .build()
                 .expect("Failed to create HTTP client"),
             proxy_base_url,
-            local_registry_path,
-            upstream_index,
-            upstream_api,
-            permissive_publishing,
+            registry,
         }
+    }
+
+    /// Get the upstream API URL (for search proxying)
+    pub fn upstream_api(&self) -> &str {
+        &self.registry.bottom.api_url
     }
 }
 

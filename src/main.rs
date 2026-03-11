@@ -1,4 +1,5 @@
 mod cli;
+mod endpoints;
 mod http_proxy;
 mod registry;
 mod state;
@@ -16,11 +17,11 @@ use std::sync::Arc;
 use tokio::fs;
 
 use cli::Args;
-use http_proxy::run_http_proxy;
-use registry::{
+use endpoints::{
     handle_api_download, handle_api_publish, handle_api_search, handle_config, handle_index_1char,
     handle_index_2char, handle_index_3char, handle_index_4plus,
 };
+use http_proxy::run_http_proxy;
 use state::{MitmCa, ProxyState};
 use tls::generate_self_signed_cert;
 
