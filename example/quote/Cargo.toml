@@ -1,0 +1,10 @@
+[package]
+name = "quote"
+version = "99.0.0"
+edition = "2024"
+description = "A simple crate that provides inspirational quotes"
+license = "Apache-2.0"
+
+[lib]
+name = "quote"
+path = "src/lib.rs"

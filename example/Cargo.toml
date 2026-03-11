@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "hello-proxy",
+    "quote",
+    "test-consumer",
+]
+resolver = "3"

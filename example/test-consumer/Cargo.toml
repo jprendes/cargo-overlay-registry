@@ -1,0 +1,8 @@
+[package]
+name = "test-consumer"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+quote = { version = "99.0.0", path = "../quote" }
