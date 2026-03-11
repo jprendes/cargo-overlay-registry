@@ -23,7 +23,7 @@ impl ProxyState {
     ) -> Self {
         Self {
             client: Client::builder()
-                .user_agent("cargo-proxy-registry/0.1.0")
+                .user_agent("cargo-overlay-registry/0.1.0")
                 .build()
                 .expect("Failed to create HTTP client"),
             proxy_base_url,
@@ -54,10 +54,10 @@ impl MitmCa {
         params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
         params
             .distinguished_name
-            .push(DnType::CommonName, "Cargo Proxy Registry CA");
+            .push(DnType::CommonName, "Cargo Overlay Registry CA");
         params
             .distinguished_name
-            .push(DnType::OrganizationName, "Cargo Proxy Registry");
+            .push(DnType::OrganizationName, "Cargo Overlay Registry");
 
         let key_pair = KeyPair::generate()?;
         let ca_cert = params.self_signed(&key_pair)?;

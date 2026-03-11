@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// Cargo registry proxy - proxies crates.io and supports local publishing
 #[derive(Parser, Debug)]
-#[command(name = "cargo-proxy-registry")]
+#[command(name = "cargo-overlay-registry")]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Port to listen on

@@ -63,7 +63,7 @@ async fn handle_http_proxy_connection(
 
     // Create a shared reqwest client for all requests on this connection
     let client = reqwest::Client::builder()
-        .user_agent("cargo-proxy-registry-http-proxy/0.1.0")
+        .user_agent("cargo-overlay-registry-http-proxy/0.1.0")
         .build()?;
 
     loop {
@@ -229,7 +229,7 @@ async fn handle_connect_mitm(
 
     // Create a shared reqwest client for all requests on this connection
     let client = reqwest::Client::builder()
-        .user_agent("cargo-proxy-registry-mitm/0.1.0")
+        .user_agent("cargo-overlay-registry-mitm/0.1.0")
         .build()?;
 
     // Split the TLS stream for reading and writing

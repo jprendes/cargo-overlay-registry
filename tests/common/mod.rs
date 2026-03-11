@@ -43,7 +43,7 @@ fn build_proxy_binary() -> PathBuf {
                 String::from_utf8_lossy(&build_output.stderr)
             );
 
-            let proxy_binary = target_dir.join("release").join("cargo-proxy-registry");
+            let proxy_binary = target_dir.join("release").join("cargo-overlay-registry");
             assert!(
                 proxy_binary.exists(),
                 "Proxy binary not found at {:?}",
