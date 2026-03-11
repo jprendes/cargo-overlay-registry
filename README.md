@@ -74,6 +74,7 @@ cargo publish --token dummy --allow-dirty
 | `--ca-cert-out` | | | Export CA certificate for HTTPS interception |
 | `--upstream-index` | | https://index.crates.io | Upstream index URL |
 | `--upstream-api` | | https://crates.io | Upstream API URL |
+| `--permissive-publishing` | | | Skip crates.io metadata validation |
 | `--tls` | | | Enable HTTPS with self-signed cert |
 | `--tls-cert` | | | TLS certificate file (PEM) |
 | `--tls-key` | | | TLS private key file (PEM) |

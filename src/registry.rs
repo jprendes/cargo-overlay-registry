@@ -301,6 +301,20 @@ pub async fn handle_api_publish(
         }
     };
 
+    // Validate metadata unless permissive publishing is enabled
+    if !state.permissive_publishing {
+        let validation_errors = metadata.validate();
+        if !validation_errors.is_empty() {
+            let msg = validation_errors.join("; ");
+            error!("  Validation failed: {}", msg);
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("Validation failed: {}", msg),
+            )
+                .into_response();
+        }
+    }
+
     info!("  Publishing: {} v{}", metadata.name, metadata.vers);
 
     let crate_len_offset = 4 + json_len;

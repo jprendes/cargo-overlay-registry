@@ -2,6 +2,7 @@
 name = "hello-proxy"
 version = "0.1.0"
 edition = "2024"
+description = "A simple test crate for the proxy"
 license = "Apache-2.0"
 
 [dependencies]

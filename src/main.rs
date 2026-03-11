@@ -76,6 +76,7 @@ async fn main() {
         local_registry_path,
         args.upstream_index,
         args.upstream_api,
+        args.permissive_publishing,
     ));
 
     let app = Router::new()

@@ -29,6 +29,99 @@ pub struct PublishMetadata {
     pub rust_version: Option<String>,
 }
 
+impl PublishMetadata {
+    /// Validate metadata according to crates.io requirements.
+    /// Returns a list of validation errors, empty if valid.
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        // Description is required
+        match &self.description {
+            None => errors.push("missing field `description`".to_string()),
+            Some(d) if d.trim().is_empty() => {
+                errors.push("the `description` field must not be empty".to_string())
+            }
+            _ => {}
+        }
+
+        // License or license_file required
+        let has_license = self.license.as_ref().is_some_and(|l| !l.trim().is_empty());
+        let has_license_file = self
+            .license_file
+            .as_ref()
+            .is_some_and(|l| !l.trim().is_empty());
+        if !has_license && !has_license_file {
+            errors.push(
+                "missing field `license` or `license-file` (at least one is required)".to_string(),
+            );
+        }
+
+        // Keywords: max 5, each max 20 chars, ASCII alphanumeric + - + _
+        if self.keywords.len() > 5 {
+            errors.push(format!(
+                "too many keywords: {} (max 5)",
+                self.keywords.len()
+            ));
+        }
+        for kw in &self.keywords {
+            if kw.len() > 20 {
+                errors.push(format!(
+                    "keyword `{}` is too long: {} chars (max 20)",
+                    kw,
+                    kw.len()
+                ));
+            }
+            if !kw.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                errors.push(format!(
+                    "keyword `{}` contains invalid characters (only ASCII alphanumeric, `-`, `_` allowed)",
+                    kw
+                ));
+            }
+            if kw.starts_with('-') || kw.starts_with('_') {
+                errors.push(format!(
+                    "keyword `{}` must start with a letter or number",
+                    kw
+                ));
+            }
+        }
+
+        // Categories: max 5
+        if self.categories.len() > 5 {
+            errors.push(format!(
+                "too many categories: {} (max 5)",
+                self.categories.len()
+            ));
+        }
+
+        // Crate name validation
+        if self.name.is_empty() {
+            errors.push("crate name cannot be empty".to_string());
+        } else if self.name.len() > 64 {
+            errors.push(format!(
+                "crate name is too long: {} chars (max 64)",
+                self.name.len()
+            ));
+        } else {
+            let first = self.name.chars().next().unwrap();
+            if !first.is_ascii_alphabetic() && first != '_' {
+                errors.push("crate name must start with a letter or underscore".to_string());
+            }
+            if !self
+                .name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                errors.push(
+                    "crate name contains invalid characters (only ASCII alphanumeric, `-`, `_` allowed)"
+                        .to_string(),
+                );
+            }
+        }
+
+        errors
+    }
+}
+
 /// Dependency in publish request
 #[derive(Deserialize, Debug)]
 pub struct PublishDependency {

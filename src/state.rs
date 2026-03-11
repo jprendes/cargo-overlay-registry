@@ -12,6 +12,8 @@ pub struct ProxyState {
     pub upstream_index: String,
     /// Upstream registry API URL
     pub upstream_api: String,
+    /// Skip crates.io-style metadata validation on publish
+    pub permissive_publishing: bool,
 }
 
 impl ProxyState {
@@ -20,6 +22,7 @@ impl ProxyState {
         local_registry_path: PathBuf,
         upstream_index: String,
         upstream_api: String,
+        permissive_publishing: bool,
     ) -> Self {
         Self {
             client: Client::builder()
@@ -30,6 +33,7 @@ impl ProxyState {
             local_registry_path,
             upstream_index,
             upstream_api,
+            permissive_publishing,
         }
     }
 }

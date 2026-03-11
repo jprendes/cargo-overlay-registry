@@ -54,4 +54,9 @@ pub struct Args {
     /// Enable HTTPS with self-signed certificate (if --tls-cert not provided)
     #[arg(long)]
     pub tls: bool,
+
+    /// Skip crates.io-style metadata validation on publish
+    /// (by default, description, license/license-file, valid keywords, etc. are required)
+    #[arg(long)]
+    pub permissive_publishing: bool,
 }

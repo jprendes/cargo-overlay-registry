@@ -70,6 +70,11 @@ pub struct ProxyTestHelper {
 impl ProxyTestHelper {
     /// Create a new proxy test helper with the given test name (used for temp directories).
     pub fn new(test_name: &str) -> Self {
+        Self::with_args(test_name, &[])
+    }
+
+    /// Create a new proxy test helper with additional command-line arguments.
+    pub fn with_args(test_name: &str, extra_args: &[&str]) -> Self {
         let proxy_binary = build_proxy_binary();
 
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -90,20 +95,30 @@ impl ProxyTestHelper {
 
         let ca_cert_path = target_dir.join(format!("test-ca-cert-{}.pem", test_name));
 
+        // Build args
+        let mut args = vec![
+            "--port",
+            &port.to_string(),
+            "--host",
+            "127.0.0.1",
+            "--registry-path",
+            registry_path.to_str().unwrap(),
+            "--http-proxy-port",
+            &http_proxy_port.to_string(),
+            "--ca-cert-out",
+            ca_cert_path.to_str().unwrap(),
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
+
+        for arg in extra_args {
+            args.push(arg.to_string());
+        }
+
         // Start the proxy server
         let process = Command::new(&proxy_binary)
-            .args([
-                "--port",
-                &port.to_string(),
-                "--host",
-                "127.0.0.1",
-                "--registry-path",
-                registry_path.to_str().unwrap(),
-                "--http-proxy-port",
-                &http_proxy_port.to_string(),
-                "--ca-cert-out",
-                ca_cert_path.to_str().unwrap(),
-            ])
+            .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
