@@ -98,10 +98,10 @@ impl MitmCa {
         )];
 
         // Add wildcard if domain has subdomains potential
-        if !domain.starts_with("*.") {
-            if let Ok(wildcard) = format!("*.{}", domain).try_into() {
-                params.subject_alt_names.push(SanType::DnsName(wildcard));
-            }
+        if !domain.starts_with("*.")
+            && let Ok(wildcard) = format!("*.{}", domain).try_into()
+        {
+            params.subject_alt_names.push(SanType::DnsName(wildcard));
         }
 
         let key_pair = KeyPair::generate()?;

@@ -84,7 +84,7 @@ async fn handle_http_proxy_connection(
 
         debug!("HTTP proxy request: {}", request_line.trim());
 
-        let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+        let parts: Vec<&str> = request_line.split_whitespace().collect();
         if parts.len() < 3 {
             write_half
                 .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
@@ -256,7 +256,7 @@ async fn handle_connect_mitm(
         }
 
         // Parse request line
-        let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+        let parts: Vec<&str> = request_line.split_whitespace().collect();
         if parts.len() < 3 {
             debug!("Invalid request line: {}", request_line.trim());
             break;
@@ -448,6 +448,7 @@ async fn handle_connect_passthrough(
 }
 
 /// Handle regular HTTP request (forward proxy) - returns true if connection should close
+#[allow(clippy::too_many_arguments)]
 async fn handle_http_forward_request<R, W>(
     buf_reader: &mut tokio::io::BufReader<R>,
     write_half: &mut W,
@@ -495,8 +496,8 @@ where
     }
 
     // Check if this is an upstream registry URL and rewrite it
-    let should_rewrite = url::Url::parse(&url).ok().map_or(false, |parsed| {
-        parsed.host_str().map_or(false, |url_host| {
+    let should_rewrite = url::Url::parse(&url).ok().is_some_and(|parsed| {
+        parsed.host_str().is_some_and(|url_host| {
             upstream_hosts
                 .iter()
                 .any(|upstream_host| {

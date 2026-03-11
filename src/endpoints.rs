@@ -311,18 +311,18 @@ async fn proxy_api_request(
     };
 
     // Forward authorization header
-    if let Some(auth) = headers.get(header::AUTHORIZATION) {
-        if let Ok(value) = auth.to_str() {
-            request = request.header(header::AUTHORIZATION, value);
-            info!("  Forwarding Authorization header");
-        }
+    if let Some(auth) = headers.get(header::AUTHORIZATION)
+        && let Ok(value) = auth.to_str()
+    {
+        request = request.header(header::AUTHORIZATION, value);
+        info!("  Forwarding Authorization header");
     }
 
     // Forward accept header
-    if let Some(accept) = headers.get(header::ACCEPT) {
-        if let Ok(value) = accept.to_str() {
-            request = request.header(header::ACCEPT, value);
-        }
+    if let Some(accept) = headers.get(header::ACCEPT)
+        && let Ok(value) = accept.to_str()
+    {
+        request = request.header(header::ACCEPT, value);
     }
 
     match request.send().await {
@@ -348,10 +348,10 @@ async fn proxy_api_request(
             match response.bytes().await {
                 Ok(body) => {
                     if body.len() < 5000 {
-                        if let Ok(text) = std::str::from_utf8(&body) {
-                            if text.starts_with('{') || text.starts_with('[') {
-                                info!("  Response body: {}", text);
-                            }
+                        if let Ok(text) = std::str::from_utf8(&body)
+                            && (text.starts_with('{') || text.starts_with('['))
+                        {
+                            info!("  Response body: {}", text);
                         }
                     } else {
                         info!("  Response body: {} bytes (binary/large)", body.len());

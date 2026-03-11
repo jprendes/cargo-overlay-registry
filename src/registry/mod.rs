@@ -14,8 +14,6 @@ use std::fmt;
 pub enum RegistryError {
     /// Crate or version not found
     NotFound,
-    /// Invalid metadata or request
-    InvalidRequest(String),
     /// Storage I/O error
     Storage(std::io::Error),
     /// Serialization error
@@ -32,7 +30,6 @@ impl fmt::Display for RegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RegistryError::NotFound => write!(f, "not found"),
-            RegistryError::InvalidRequest(msg) => write!(f, "invalid request: {}", msg),
             RegistryError::Storage(e) => write!(f, "storage error: {}", e),
             RegistryError::Serialization(e) => write!(f, "serialization error: {}", e),
             RegistryError::ValidationFailed(errors) => {

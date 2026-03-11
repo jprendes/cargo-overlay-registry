@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
-use std::{fs, sync::OnceLock};
+use std::sync::OnceLock;
+use tempfile::TempDir;
 
 /// Wait for the server to be ready by attempting to connect
 fn wait_for_server(host: &str, port: u16, timeout: Duration) -> bool {
@@ -64,7 +65,9 @@ pub struct ProxyTestHelper {
     http_proxy_port: u16,
     ca_cert_path: PathBuf,
     cargo_home: PathBuf,
+    #[allow(dead_code)]
     pub registry_path: PathBuf,
+    _temp_dir: TempDir,
 }
 
 impl ProxyTestHelper {
@@ -77,23 +80,21 @@ impl ProxyTestHelper {
     pub fn with_args(test_name: &str, extra_args: &[&str]) -> Self {
         let proxy_binary = build_proxy_binary();
 
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let target_dir = manifest_dir.join("target");
-
         // Find available ports
         let port = find_available_port();
         let http_proxy_port = find_available_port();
 
-        // Create temporary directories
-        let registry_path = target_dir.join(format!("test-registry-{}", test_name));
-        let _ = fs::remove_dir_all(&registry_path);
-        fs::create_dir_all(&registry_path).expect("Failed to create test registry dir");
+        // Create temporary directory for test artifacts
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+        let temp_path = temp_dir.path();
 
-        let cargo_home = target_dir.join(format!("test-cargo-home-{}", test_name));
-        let _ = fs::remove_dir_all(&cargo_home);
-        fs::create_dir_all(&cargo_home).expect("Failed to create test cargo home");
+        let registry_path = temp_path.join("registry");
+        std::fs::create_dir_all(&registry_path).expect("Failed to create registry dir");
 
-        let ca_cert_path = target_dir.join(format!("test-ca-cert-{}.pem", test_name));
+        let cargo_home = temp_path.join("cargo-home");
+        std::fs::create_dir_all(&cargo_home).expect("Failed to create cargo home");
+
+        let ca_cert_path = temp_path.join(format!("{}-ca-cert.pem", test_name));
 
         // Build args
         let mut args = vec![
@@ -131,6 +132,7 @@ impl ProxyTestHelper {
             ca_cert_path,
             cargo_home,
             registry_path,
+            _temp_dir: temp_dir,
         };
 
         // Wait for servers to be ready
