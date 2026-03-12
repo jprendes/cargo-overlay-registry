@@ -62,10 +62,7 @@ impl PublishMetadata {
             .documentation
             .as_ref()
             .is_some_and(|d| !d.trim().is_empty());
-        let has_homepage = self
-            .homepage
-            .as_ref()
-            .is_some_and(|h| !h.trim().is_empty());
+        let has_homepage = self.homepage.as_ref().is_some_and(|h| !h.trim().is_empty());
         let has_repository = self
             .repository
             .as_ref()

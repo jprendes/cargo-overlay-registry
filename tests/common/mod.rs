@@ -66,6 +66,7 @@ pub struct ProxyTestHelper {
     http_proxy_port: u16,
     ca_cert_path: PathBuf,
     cargo_home: PathBuf,
+    target_dir: PathBuf,
     #[allow(dead_code)]
     pub registry_path: PathBuf,
     _temp_dir: TempDir,
@@ -95,6 +96,9 @@ impl ProxyTestHelper {
         let cargo_home = temp_path.join("cargo-home");
         std::fs::create_dir_all(&cargo_home).expect("Failed to create cargo home");
 
+        let target_dir = temp_path.join("target");
+        std::fs::create_dir_all(&target_dir).expect("Failed to create target dir");
+
         let ca_cert_path = temp_path.join(format!("{}-ca-cert.pem", test_name));
 
         // Build args
@@ -109,6 +113,8 @@ impl ProxyTestHelper {
             &http_proxy_port.to_string(),
             "--ca-cert-out",
             ca_cert_path.to_str().unwrap(),
+            "--base-url",
+            "https://crates.io",
         ]
         .into_iter()
         .map(String::from)
@@ -132,6 +138,7 @@ impl ProxyTestHelper {
             http_proxy_port,
             ca_cert_path,
             cargo_home,
+            target_dir,
             registry_path,
             _temp_dir: temp_dir,
         };
@@ -154,6 +161,7 @@ impl ProxyTestHelper {
         let http_proxy_url = format!("http://127.0.0.1:{}", self.http_proxy_port);
         let mut cmd = Command::new("cargo");
         cmd.env("CARGO_HOME", &self.cargo_home)
+            .env("CARGO_TARGET_DIR", &self.target_dir)
             .env("CARGO_HTTP_PROXY", &http_proxy_url)
             .env("CARGO_HTTP_CAINFO", &self.ca_cert_path)
             .env("CARGO_REGISTRY_TOKEN", "dummy");
