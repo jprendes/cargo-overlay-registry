@@ -18,8 +18,8 @@ name = "cargo-overlay-registry"
 path = "src/main.rs"
 
 [[bin]]
-name = "cargo-proxy-registry"
-path = "src/main.rs"
+name = "cargo-publish-dry-run"
+path = "src/bin/cargo-publish-dry-run.rs"
 
 [dependencies]
 axum = "0.8"
