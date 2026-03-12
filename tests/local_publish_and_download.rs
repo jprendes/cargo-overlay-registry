@@ -54,11 +54,7 @@ fn test_local_publish_and_download() {
     );
 
     // Step 3: Run the consumer binary and verify it works
-    let consumer_binary = manifest_dir
-        .join("example")
-        .join("target")
-        .join("debug")
-        .join("test-consumer");
+    let consumer_binary = proxy.target_dir.join("debug").join("test-consumer");
 
     assert!(
         consumer_binary.exists(),

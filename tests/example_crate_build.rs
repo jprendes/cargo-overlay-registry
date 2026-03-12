@@ -9,9 +9,9 @@ use common::ProxyTestHelper;
 fn test_example_crate_build() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let example_dir = manifest_dir.join("example").join("hello-proxy");
-    let target_dir = manifest_dir.join("target");
 
     let proxy = ProxyTestHelper::new("example");
+    let target_dir = &proxy.target_dir;
 
     // Build the example crate using only the HTTP proxy
     let build_output = proxy

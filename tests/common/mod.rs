@@ -66,9 +66,12 @@ pub struct ProxyTestHelper {
     http_proxy_port: u16,
     ca_cert_path: PathBuf,
     cargo_home: PathBuf,
-    target_dir: PathBuf,
+    #[allow(dead_code)]
+    pub target_dir: PathBuf,
     #[allow(dead_code)]
     pub registry_path: PathBuf,
+    #[allow(dead_code)]
+    pub temp_path: PathBuf,
     _temp_dir: TempDir,
 }
 
@@ -140,6 +143,7 @@ impl ProxyTestHelper {
             cargo_home,
             target_dir,
             registry_path,
+            temp_path: temp_dir.path().to_path_buf(),
             _temp_dir: temp_dir,
         };
 

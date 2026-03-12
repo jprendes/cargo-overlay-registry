@@ -1,19 +1,18 @@
 mod common;
 
 use std::fs;
-use std::path::PathBuf;
 
 use common::ProxyTestHelper;
 
 /// Test that validation rejects crates missing required metadata (enabled by default)
 #[test]
 fn test_rejects_incomplete_metadata() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let target_dir = manifest_dir.join("target");
-    let test_crate_dir = target_dir.join("test-strict-incomplete");
+    // Start proxy (validation is on by default)
+    let proxy = ProxyTestHelper::new("strict-incomplete");
 
-    // Clean up and create test crate directory
-    let _ = fs::remove_dir_all(&test_crate_dir);
+    let test_crate_dir = proxy.temp_path.join("test-strict-incomplete");
+
+    // Create test crate directory
     fs::create_dir_all(test_crate_dir.join("src")).expect("Failed to create test crate dir");
 
     // Create a minimal Cargo.toml WITHOUT description or license (should fail validation)
@@ -30,9 +29,6 @@ edition = "2021"
 
     // Create a minimal lib.rs
     fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
-
-    // Start proxy (validation is on by default)
-    let proxy = ProxyTestHelper::new("strict-incomplete");
 
     // Try to publish - should fail
     let publish_output = proxy
@@ -67,12 +63,12 @@ edition = "2021"
 /// Test that validation accepts crates with complete metadata
 #[test]
 fn test_accepts_complete_metadata() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let target_dir = manifest_dir.join("target");
-    let test_crate_dir = target_dir.join("test-strict-complete");
+    // Start proxy (validation is on by default)
+    let proxy = ProxyTestHelper::new("strict-complete");
 
-    // Clean up and create test crate directory
-    let _ = fs::remove_dir_all(&test_crate_dir);
+    let test_crate_dir = proxy.temp_path.join("test-strict-complete");
+
+    // Create test crate directory
     fs::create_dir_all(test_crate_dir.join("src")).expect("Failed to create test crate dir");
 
     // Create a complete Cargo.toml with all required fields
@@ -91,9 +87,6 @@ repository = "https://github.com/example/test"
 
     // Create a minimal lib.rs
     fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
-
-    // Start proxy (validation is on by default)
-    let proxy = ProxyTestHelper::new("strict-complete");
 
     // Try to publish - should succeed
     let publish_output = proxy
@@ -133,12 +126,12 @@ repository = "https://github.com/example/test"
 /// Test that too many keywords are rejected
 #[test]
 fn test_rejects_too_many_keywords() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let target_dir = manifest_dir.join("target");
-    let test_crate_dir = target_dir.join("test-strict-keywords");
+    // Start proxy (validation is on by default)
+    let proxy = ProxyTestHelper::new("strict-keywords");
 
-    // Clean up and create test crate directory
-    let _ = fs::remove_dir_all(&test_crate_dir);
+    let test_crate_dir = proxy.temp_path.join("test-strict-keywords");
+
+    // Create test crate directory
     fs::create_dir_all(test_crate_dir.join("src")).expect("Failed to create test crate dir");
 
     // Create Cargo.toml with too many keywords (max 5)
@@ -158,9 +151,6 @@ keywords = ["one", "two", "three", "four", "five", "six"]
 
     // Create a minimal lib.rs
     fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
-
-    // Start proxy (validation is on by default)
-    let proxy = ProxyTestHelper::new("strict-keywords");
 
     // Try to publish - should fail
     let publish_output = proxy
@@ -194,12 +184,12 @@ keywords = ["one", "two", "three", "four", "five", "six"]
 /// Test that --permissive-publishing allows incomplete metadata
 #[test]
 fn test_permissive_publishing_allows_incomplete() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let target_dir = manifest_dir.join("target");
-    let test_crate_dir = target_dir.join("test-permissive");
+    // Start proxy with --permissive-publishing to skip validation
+    let proxy = ProxyTestHelper::with_args("permissive", &["--permissive-publishing"]);
 
-    // Clean up and create test crate directory
-    let _ = fs::remove_dir_all(&test_crate_dir);
+    let test_crate_dir = proxy.temp_path.join("test-permissive");
+
+    // Create test crate directory
     fs::create_dir_all(test_crate_dir.join("src")).expect("Failed to create test crate dir");
 
     // Create a minimal Cargo.toml WITHOUT description or license
@@ -216,9 +206,6 @@ edition = "2021"
 
     // Create a minimal lib.rs
     fs::write(test_crate_dir.join("src/lib.rs"), "// empty\n").expect("Failed to write lib.rs");
-
-    // Start proxy with --permissive-publishing to skip validation
-    let proxy = ProxyTestHelper::with_args("permissive", &["--permissive-publishing"]);
 
     // Try to publish - should succeed despite missing metadata
     let publish_output = proxy
