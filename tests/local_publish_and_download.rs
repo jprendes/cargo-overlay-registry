@@ -16,7 +16,7 @@ fn test_local_publish_and_download() {
     // Step 1: Publish the quote crate
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&quote_dir)
         .output()
         .expect("Failed to run cargo publish");

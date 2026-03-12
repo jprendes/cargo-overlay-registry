@@ -155,7 +155,8 @@ impl ProxyTestHelper {
         let mut cmd = Command::new("cargo");
         cmd.env("CARGO_HOME", &self.cargo_home)
             .env("CARGO_HTTP_PROXY", &http_proxy_url)
-            .env("CARGO_HTTP_CAINFO", &self.ca_cert_path);
+            .env("CARGO_HTTP_CAINFO", &self.ca_cert_path)
+            .env("CARGO_REGISTRY_TOKEN", "dummy");
         cmd
     }
 }

@@ -51,6 +51,7 @@ cargo-overlay-registry \
 ```bash
 export CARGO_HTTP_PROXY="http://127.0.0.1:8081"
 export CARGO_HTTP_CAINFO="./ca-cert.pem"
+export CARGO_REGISTRY_TOKEN=dummy
 ```
 
 ### 3. Use cargo normally
@@ -60,7 +61,7 @@ export CARGO_HTTP_CAINFO="./ca-cert.pem"
 cargo build
 
 # Publishes go to the local overlay
-cargo publish --token dummy --allow-dirty
+cargo publish --allow-dirty
 ```
 
 ## Options
@@ -90,15 +91,16 @@ cargo-overlay-registry \
 # In another terminal, configure cargo
 export CARGO_HTTP_PROXY="http://127.0.0.1:8081"
 export CARGO_HTTP_CAINFO="./ca-cert.pem"
+export CARGO_REGISTRY_TOKEN=dummy
 
 # Publish my-core (stored locally, not on crates.io)
 cd my-core
-cargo publish --token dummy --allow-dirty
+cargo publish --allow-dirty
 
 # Publish my-app which depends on my-core
 # The overlay serves my-core from the local layer
 cd ../my-app
-cargo publish --token dummy --allow-dirty
+cargo publish --allow-dirty
 
 # Build a project that uses my-app
 # The overlay serves my-app and my-core locally,

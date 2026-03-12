@@ -13,18 +13,9 @@ fn test_workspace_publish() {
     let proxy = ProxyTestHelper::new("workspace");
 
     // Publish the entire workspace using cargo publish --workspace
-    // Use --no-verify because cargo verifies packages before uploading them all,
-    // which fails when test-consumer needs quote v99.0.0 that hasn't been uploaded yet
     let publish_output = proxy
         .cargo_command()
-        .args([
-            "publish",
-            "--workspace",
-            "--allow-dirty",
-            "--token",
-            "dummy",
-            "--no-verify",
-        ])
+        .args(["publish", "--workspace", "--allow-dirty"])
         .current_dir(&example_dir)
         .output()
         .expect("Failed to run cargo publish --workspace");

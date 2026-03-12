@@ -15,7 +15,7 @@ fn test_publish_quote_crate() {
     // Publish using cargo publish
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&quote_dir)
         .output()
         .expect("Failed to run cargo publish");

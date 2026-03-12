@@ -57,6 +57,25 @@ impl PublishMetadata {
             );
         }
 
+        // At least one of documentation, homepage, or repository is required
+        let has_documentation = self
+            .documentation
+            .as_ref()
+            .is_some_and(|d| !d.trim().is_empty());
+        let has_homepage = self
+            .homepage
+            .as_ref()
+            .is_some_and(|h| !h.trim().is_empty());
+        let has_repository = self
+            .repository
+            .as_ref()
+            .is_some_and(|r| !r.trim().is_empty());
+        if !has_documentation && !has_homepage && !has_repository {
+            errors.push(
+                "missing field `documentation`, `homepage`, or `repository` (at least one is required)".to_string(),
+            );
+        }
+
         // Keywords: max 5, each max 20 chars, ASCII alphanumeric + - + _
         if self.keywords.len() > 5 {
             errors.push(format!(

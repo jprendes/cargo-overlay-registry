@@ -37,7 +37,7 @@ edition = "2021"
     // Try to publish - should fail
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&test_crate_dir)
         .output()
         .expect("Failed to run cargo publish");
@@ -84,6 +84,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A test crate with complete metadata"
 license = "MIT"
+repository = "https://github.com/example/test"
 "#,
     )
     .expect("Failed to write Cargo.toml");
@@ -97,7 +98,7 @@ license = "MIT"
     // Try to publish - should succeed
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&test_crate_dir)
         .output()
         .expect("Failed to run cargo publish");
@@ -149,6 +150,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A test crate"
 license = "MIT"
+repository = "https://github.com/example/test"
 keywords = ["one", "two", "three", "four", "five", "six"]
 "#,
     )
@@ -163,7 +165,7 @@ keywords = ["one", "two", "three", "four", "five", "six"]
     // Try to publish - should fail
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&test_crate_dir)
         .output()
         .expect("Failed to run cargo publish");
@@ -221,7 +223,7 @@ edition = "2021"
     // Try to publish - should succeed despite missing metadata
     let publish_output = proxy
         .cargo_command()
-        .args(["publish", "--allow-dirty", "--token", "dummy"])
+        .args(["publish", "--allow-dirty"])
         .current_dir(&test_crate_dir)
         .output()
         .expect("Failed to run cargo publish");

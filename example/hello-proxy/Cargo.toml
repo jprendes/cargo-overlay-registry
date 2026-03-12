@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "A simple test crate for the proxy"
 license = "Apache-2.0"
+homepage = "https://github.com/jprendes/cargo-proxy-registry"
+repository = "https://github.com/jprendes/cargo-proxy-registry"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
