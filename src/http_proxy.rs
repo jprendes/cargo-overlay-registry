@@ -3,12 +3,15 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
+use axum::Router;
 use hyper_util::rt::TokioIo;
+use hyper_util::server::conn::auto::Builder;
 use log::{debug, error, info};
 use rustls::ServerConfig;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
+use tower::Service;
 
 use crate::endpoints::{handle_internal_request, InternalResponse};
 use crate::state::{MitmCa, ProxyState};
@@ -462,4 +465,63 @@ fn convert_internal_response(internal: InternalResponse) -> Response {
     }
 
     builder.body(Body::from(internal.body)).unwrap()
+}
+
+/// Serve HTTP requests on any stream type with proxy support
+pub async fn serve_stream<S>(stream: S, app: Router, proxy_state: HttpProxyState)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use std::convert::Infallible;
+
+    use hyper::service::service_fn;
+    use hyper_util::rt::TokioExecutor;
+
+    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+        let mut app = app.clone();
+        let proxy_state = proxy_state.clone();
+
+        async move {
+            let (parts, body) = request.into_parts();
+            let body = Body::new(body);
+            let request = Request::from_parts(parts, body);
+
+            if is_proxy_request(&request) {
+                let response = handle_proxy_request(State(proxy_state), request).await;
+                Ok::<_, Infallible>(response)
+            } else {
+                let response = app.call(request).await.into_response();
+                Ok::<_, Infallible>(response)
+            }
+        }
+    });
+
+    let io = TokioIo::new(stream);
+    if let Err(e) = Builder::new(TokioExecutor::new())
+        .serve_connection_with_upgrades(io, service)
+        .await
+    {
+        debug!("Connection error: {}", e);
+    }
+}
+
+/// Handle a proxy connection, optionally with TLS
+pub async fn handle_proxy_connection(
+    stream: TcpStream,
+    app: Router,
+    proxy_state: HttpProxyState,
+    tls_acceptor: Option<TlsAcceptor>,
+) {
+    if let Some(tls_acceptor) = tls_acceptor {
+        let tls_stream = match tls_acceptor.accept(stream).await {
+            Ok(s) => s,
+            Err(e) => {
+                debug!("TLS handshake error: {}", e);
+                return;
+            }
+        };
+        serve_stream(tls_stream, app, proxy_state).await;
+    } else {
+        serve_stream(stream, app, proxy_state).await;
+    }
 }
