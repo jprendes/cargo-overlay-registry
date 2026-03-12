@@ -62,6 +62,26 @@ cargo build
 cargo publish --allow-dirty
 ```
 
+## cargo publish-dry-run
+
+For quick dry-run testing, use the `cargo-publish-dry-run` binary. It automatically starts a temporary overlay registry, configures cargo, runs `cargo publish`, and cleans up:
+
+```bash
+# Install
+cargo install --path . --bin cargo-publish-dry-run
+
+# Use as a cargo subcommand
+cargo publish-dry-run --allow-dirty
+
+# Or run directly
+cargo-publish-dry-run --allow-dirty
+
+# Publish a workspace
+cargo publish-dry-run --workspace --allow-dirty
+```
+
+All arguments are forwarded to `cargo publish`. Metadata validation is enforced (same as crates.io), so you can verify your crate meets publishing requirements before actually publishing.
+
 ## Options
 
 | Option | Short | Default | Description |

@@ -1,26 +1,15 @@
 mod cli;
-mod endpoints;
-mod http_proxy;
-mod registry;
-mod state;
-mod tls;
-mod types;
 
 use std::sync::Arc;
 
-use axum::routing::{get, put};
-use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
+use cargo_overlay_registry::{
+    build_registry_router, generate_self_signed_cert, handle_proxy_connection, HttpProxyState,
+    MitmCa, ProxyState,
+};
 use clap::Parser;
 use cli::Args;
-use endpoints::{
-    handle_api_download, handle_api_publish, handle_api_search, handle_config, handle_index_1char,
-    handle_index_2char, handle_index_3char, handle_index_4plus,
-};
-use http_proxy::{handle_proxy_connection, HttpProxyState};
 use log::info;
-use state::{MitmCa, ProxyState};
-use tls::generate_self_signed_cert;
 use tokio::fs;
 
 #[tokio::main]
@@ -127,28 +116,8 @@ async fn main() {
     info!("Listening on {}", bind_addr);
     info!("Configure cargo to use: sparse+{}/", proxy_base_url);
 
-    // Build the router with optional HTTP proxy fallback
-    let app = Router::new()
-        // Index config endpoint
-        .route("/config.json", get(handle_config))
-        // Index files for 1-char package names: /1/{name}
-        .route("/1/{name}", get(handle_index_1char))
-        // Index files for 2-char package names: /2/{name}
-        .route("/2/{name}", get(handle_index_2char))
-        // Index files for 3-char package names: /3/{first_char}/{name}
-        .route("/3/{first_char}/{name}", get(handle_index_3char))
-        // Index files for 4+ char package names: /{first_two}/{second_two}/{name}
-        .route("/{first_two}/{second_two}/{name}", get(handle_index_4plus))
-        // API: Search crates
-        .route("/api/v1/crates", get(handle_api_search))
-        // API: Publish crate
-        .route("/api/v1/crates/new", put(handle_api_publish))
-        // API: Download crate
-        .route(
-            "/api/v1/crates/{crate_name}/{version}/download",
-            get(handle_api_download),
-        )
-        .with_state(state);
+    // Build the router
+    let app = build_registry_router(state);
 
     // Server startup with different modes:
     // - TLS + proxy: Custom service over TLS for CONNECT support

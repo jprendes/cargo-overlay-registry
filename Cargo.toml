@@ -4,6 +4,18 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 
+[lib]
+name = "cargo_overlay_registry"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cargo-overlay-registry"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-proxy-registry"
+path = "src/main.rs"
+
 [dependencies]
 axum = "0.8"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
