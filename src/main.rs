@@ -23,6 +23,71 @@ use state::{MitmCa, ProxyState};
 use tls::generate_self_signed_cert;
 use tokio::fs;
 
+/// Serve HTTP requests on any stream type with proxy support
+async fn serve_stream<S>(stream: S, app: Router, proxy_state: HttpProxyState)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use std::convert::Infallible;
+
+    use axum::body::Body;
+    use axum::extract::Request;
+    use axum::response::IntoResponse;
+    use hyper::service::service_fn;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use hyper_util::server::conn::auto::Builder;
+    use tower::Service;
+
+    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+        let mut app = app.clone();
+        let proxy_state = proxy_state.clone();
+
+        async move {
+            let (parts, body) = request.into_parts();
+            let body = Body::new(body);
+            let request = Request::from_parts(parts, body);
+
+            if is_proxy_request(&request) {
+                let response =
+                    handle_proxy_request(axum::extract::State(proxy_state), request).await;
+                Ok::<_, Infallible>(response)
+            } else {
+                let response = app.call(request).await.into_response();
+                Ok::<_, Infallible>(response)
+            }
+        }
+    });
+
+    let io = TokioIo::new(stream);
+    if let Err(e) = Builder::new(TokioExecutor::new())
+        .serve_connection_with_upgrades(io, service)
+        .await
+    {
+        log::debug!("Connection error: {}", e);
+    }
+}
+
+/// Handle a proxy connection, optionally with TLS
+async fn handle_proxy_connection(
+    stream: tokio::net::TcpStream,
+    app: Router,
+    proxy_state: HttpProxyState,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+) {
+    if let Some(tls_acceptor) = tls_acceptor {
+        let tls_stream = match tls_acceptor.accept(stream).await {
+            Ok(s) => s,
+            Err(e) => {
+                log::debug!("TLS handshake error: {}", e);
+                return;
+            }
+        };
+        serve_stream(tls_stream, app, proxy_state).await;
+    } else {
+        serve_stream(stream, app, proxy_state).await;
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize the logger
@@ -158,21 +223,11 @@ async fn main() {
 
     if let Some(proxy_state) = http_proxy_state {
         // Proxy mode - use custom service to handle CONNECT and absolute URLs
-        use std::convert::Infallible;
-
-        use axum::body::Body;
-        use axum::extract::Request;
-        use axum::response::IntoResponse;
-        use hyper::service::service_fn;
-        use hyper_util::rt::{TokioExecutor, TokioIo};
-        use hyper_util::server::conn::auto::Builder;
-        use tower::Service;
-
         let listener = tokio::net::TcpListener::bind(&bind_addr)
             .await
             .expect("Failed to bind to port");
 
-        if use_tls {
+        let tls_acceptor = if use_tls {
             // TLS with proxy support
             let (cert_pem, key_pem) = if let (Some(cert_path), Some(key_path)) =
                 (&args.tls_cert, &args.tls_key)
@@ -200,95 +255,23 @@ async fn main() {
                 .with_single_cert(certs, key)
                 .expect("Failed to create TLS config");
 
-            let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
-
-            loop {
-                let (stream, _addr) = listener.accept().await.expect("Failed to accept");
-                let app = app.clone();
-                let proxy_state = proxy_state.clone();
-                let tls_acceptor = tls_acceptor.clone();
-
-                tokio::spawn(async move {
-                    let tls_stream = match tls_acceptor.accept(stream).await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            log::debug!("TLS handshake error: {}", e);
-                            return;
-                        }
-                    };
-
-                    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
-                        let mut app = app.clone();
-                        let proxy_state = proxy_state.clone();
-
-                        async move {
-                            let (parts, body) = request.into_parts();
-                            let body = Body::new(body);
-                            let request = Request::from_parts(parts, body);
-
-                            if is_proxy_request(&request) {
-                                let response = handle_proxy_request(
-                                    axum::extract::State(proxy_state),
-                                    request,
-                                )
-                                .await;
-                                Ok::<_, Infallible>(response)
-                            } else {
-                                let response = app.call(request).await.into_response();
-                                Ok::<_, Infallible>(response)
-                            }
-                        }
-                    });
-
-                    let io = TokioIo::new(tls_stream);
-                    if let Err(e) = Builder::new(TokioExecutor::new())
-                        .serve_connection_with_upgrades(io, service)
-                        .await
-                    {
-                        log::debug!("Connection error: {}", e);
-                    }
-                });
-            }
+            Some(tokio_rustls::TlsAcceptor::from(Arc::new(server_config)))
         } else {
-            // HTTP with proxy support
-            loop {
-                let (stream, _addr) = listener.accept().await.expect("Failed to accept");
-                let app = app.clone();
-                let proxy_state = proxy_state.clone();
+            None
+        };
 
-                tokio::spawn(async move {
-                    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
-                        let mut app = app.clone();
-                        let proxy_state = proxy_state.clone();
+        loop {
+            let (stream, _addr) = listener.accept().await.expect("Failed to accept");
+            let app = app.clone();
+            let proxy_state = proxy_state.clone();
+            let tls_acceptor = tls_acceptor.clone();
 
-                        async move {
-                            let (parts, body) = request.into_parts();
-                            let body = Body::new(body);
-                            let request = Request::from_parts(parts, body);
-
-                            if is_proxy_request(&request) {
-                                let response = handle_proxy_request(
-                                    axum::extract::State(proxy_state),
-                                    request,
-                                )
-                                .await;
-                                Ok::<_, Infallible>(response)
-                            } else {
-                                let response = app.call(request).await.into_response();
-                                Ok::<_, Infallible>(response)
-                            }
-                        }
-                    });
-
-                    let io = TokioIo::new(stream);
-                    if let Err(e) = Builder::new(TokioExecutor::new())
-                        .serve_connection_with_upgrades(io, service)
-                        .await
-                    {
-                        log::debug!("Connection error: {}", e);
-                    }
-                });
-            }
+            tokio::spawn(handle_proxy_connection(
+                stream,
+                app,
+                proxy_state,
+                tls_acceptor,
+            ));
         }
     } else if use_tls {
         // TLS without proxy support - use simple axum_server
