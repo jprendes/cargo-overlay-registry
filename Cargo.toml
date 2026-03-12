@@ -3,6 +3,11 @@ name = "cargo-overlay-registry"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+description = "A local Cargo registry proxy that overlays local crates on top of crates.io"
+repository = "https://github.com/jprendes/cargo-overlay-registry"
+readme = "README.md"
+keywords = ["cargo", "registry", "proxy", "publish", "overlay"]
+categories = ["development-tools::cargo-plugins"]
 
 [lib]
 name = "cargo_overlay_registry"
