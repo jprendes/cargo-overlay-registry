@@ -41,14 +41,17 @@ fn test_workspace_publish() {
 
     let binary = build_publish_dry_run_binary();
 
-    // Use a temp target dir to avoid conflicts with other builds
+    // Use temp dirs to avoid conflicts with other builds and ensure test isolation
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
     let target_dir = temp_dir.path().join("target");
+    let cargo_home = temp_dir.path().join("cargo-home");
 
     // Publish the entire workspace using cargo-publish-dry-run
     let publish_output = Command::new(&binary)
         .args(["--workspace", "--allow-dirty"])
         .env("CARGO_TARGET_DIR", &target_dir)
+        .env("CARGO_HOME", &cargo_home)
+        .env("CARGO_TERM_COLOR", "never")
         .current_dir(&example_dir)
         .output()
         .expect("Failed to run cargo-publish-dry-run");

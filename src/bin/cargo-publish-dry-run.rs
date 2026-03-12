@@ -59,11 +59,6 @@ async fn main() -> ExitCode {
         .await
         .expect("Failed to create index directory");
 
-    let cargo_home = temp_path.join("cargo-home");
-    fs::create_dir_all(&cargo_home)
-        .await
-        .expect("Failed to create cargo home");
-
     let ca_cert_path = temp_path.join("ca-cert.pem");
 
     // Create proxy state
@@ -150,10 +145,9 @@ async fn main() -> ExitCode {
         cmd.arg(arg);
     }
 
-    // Set environment variables
+    // Set environment variables for cargo
     let http_proxy_url = format!("http://127.0.0.1:{}", port);
-    cmd.env("CARGO_HOME", &cargo_home)
-        .env("CARGO_HTTP_PROXY", &http_proxy_url)
+    cmd.env("CARGO_HTTP_PROXY", &http_proxy_url)
         .env("CARGO_HTTP_CAINFO", &ca_cert_path)
         .env("CARGO_REGISTRY_TOKEN", "dummy-token");
 
