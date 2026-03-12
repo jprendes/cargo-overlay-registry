@@ -41,15 +41,13 @@ cargo install --path .
 ### 1. Start the overlay
 
 ```bash
-cargo-overlay-registry \
-  --http-proxy-port 8081 \
-  --ca-cert-out ./ca-cert.pem
+cargo-overlay-registry --ca-cert-out ./ca-cert.pem
 ```
 
 ### 2. Configure cargo
 
 ```bash
-export CARGO_HTTP_PROXY="http://127.0.0.1:8081"
+export CARGO_HTTP_PROXY="http://127.0.0.1:8080"
 export CARGO_HTTP_CAINFO="./ca-cert.pem"
 export CARGO_REGISTRY_TOKEN=dummy
 ```
@@ -68,15 +66,15 @@ cargo publish --allow-dirty
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--port` | `-p` | 8080 | Registry server port |
+| `--port` | `-p` | 8080 | Server port (registry + proxy) |
 | `--host` | `-H` | 0.0.0.0 | Host to bind to |
-| `--registry-path` | `-r` | ./local-registry | Local overlay storage |
-| `--http-proxy-port` | | | HTTP proxy port (enables interception) |
+| `--registry-path` | `-r` | (temp dir) | Local overlay storage |
+| `--no-proxy` | | | Disable proxy mode |
 | `--ca-cert-out` | | | Export CA certificate for HTTPS interception |
 | `--upstream-index` | | https://index.crates.io | Upstream index URL |
 | `--upstream-api` | | https://crates.io | Upstream API URL |
 | `--permissive-publishing` | | | Skip crates.io metadata validation |
-| `--tls` | | | Enable HTTPS with self-signed cert |
+| `--tls` | | | Enable HTTPS (use with `CARGO_HTTP_PROXY=https://...`) |
 | `--tls-cert` | | | TLS certificate file (PEM) |
 | `--tls-key` | | | TLS private key file (PEM) |
 
@@ -84,12 +82,10 @@ cargo publish --allow-dirty
 
 ```bash
 # Start the overlay
-cargo-overlay-registry \
-  --http-proxy-port 8081 \
-  --ca-cert-out ./ca-cert.pem
+cargo-overlay-registry --ca-cert-out ./ca-cert.pem
 
 # In another terminal, configure cargo
-export CARGO_HTTP_PROXY="http://127.0.0.1:8081"
+export CARGO_HTTP_PROXY="http://127.0.0.1:8080"
 export CARGO_HTTP_CAINFO="./ca-cert.pem"
 export CARGO_REGISTRY_TOKEN=dummy
 

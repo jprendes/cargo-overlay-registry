@@ -23,7 +23,10 @@ futures = "0.3"
 sha2 = "0.10"
 clap = { version = "4", features = ["derive"] }
 url = "2"
+hyper = { version = "1.8.1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.20", features = ["tokio", "server-auto"] }
+tower = { version = "0.5.3", features = ["util"] }
+tempfile = "3"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["blocking"] }
-tempfile = "3"

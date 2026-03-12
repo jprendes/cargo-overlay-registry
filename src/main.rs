@@ -17,7 +17,7 @@ use endpoints::{
     handle_api_download, handle_api_publish, handle_api_search, handle_config, handle_index_1char,
     handle_index_2char, handle_index_3char, handle_index_4plus,
 };
-use http_proxy::run_http_proxy;
+use http_proxy::{handle_proxy_request, is_proxy_request, HttpProxyState};
 use log::info;
 use state::{MitmCa, ProxyState};
 use tls::generate_self_signed_cert;
@@ -30,15 +30,23 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Determine protocol and base URL
+    // Determine if TLS is enabled
     let use_tls = args.tls || args.tls_cert.is_some();
-    let protocol = if use_tls { "https" } else { "http" };
 
-    let proxy_base_url = args
-        .base_url
-        .unwrap_or_else(|| format!("{}://localhost:{}", protocol, args.port));
+    // Determine if HTTP proxy mode is enabled (enabled by default unless --no-proxy)
+    let enable_http_proxy = !args.no_proxy;
 
-    let local_registry_path = args.registry_path;
+    let proxy_base_url = args.base_url.clone();
+
+    // Use provided registry path or create a temporary directory
+    let (_temp_dir, local_registry_path): (Option<tempfile::TempDir>, std::path::PathBuf) =
+        if let Some(path) = args.registry_path {
+            (None, path)
+        } else {
+            let temp_dir = tempfile::tempdir().expect("Failed to create temporary directory");
+            let path = temp_dir.path().to_path_buf();
+            (Some(temp_dir), path)
+        };
 
     info!(
         "Starting cargo registry proxy on {}:{}",
@@ -51,6 +59,9 @@ async fn main() {
     if use_tls {
         info!("TLS enabled");
     }
+    if enable_http_proxy {
+        info!("HTTP proxy mode enabled");
+    }
 
     // Create local registry directories
     fs::create_dir_all(local_registry_path.join("crates"))
@@ -60,7 +71,7 @@ async fn main() {
         .await
         .ok();
 
-    // Extract hosts from upstream URLs for HTTP proxy interception (before args are moved)
+    // Extract hosts from upstream URLs for HTTP proxy interception
     let upstream_hosts: Vec<String> = [&args.upstream_index, &args.upstream_api]
         .iter()
         .filter_map(|url_str| {
@@ -78,6 +89,45 @@ async fn main() {
         args.permissive_publishing,
     ));
 
+    // Set up HTTP proxy state if enabled
+    let http_proxy_state = if enable_http_proxy {
+        info!("Intercepting hosts: {:?}", upstream_hosts);
+
+        // Generate MITM CA certificate
+        let mitm_ca = Arc::new(MitmCa::new().expect("Failed to generate MITM CA certificate"));
+
+        // Export CA certificate if requested
+        if let Some(ca_cert_path) = &args.ca_cert_out {
+            std::fs::write(ca_cert_path, mitm_ca.ca_cert_pem())
+                .expect("Failed to write CA certificate");
+            info!("Exported CA certificate to {:?}", ca_cert_path);
+            info!(
+                "Set CARGO_HTTP_CAINFO={:?} to trust the proxy's certificates",
+                ca_cert_path
+            );
+        }
+
+        let protocol = if use_tls { "https" } else { "http" };
+        info!(
+            "Set CARGO_HTTP_PROXY={}://{}:{} to route traffic through proxy",
+            protocol, args.host, args.port
+        );
+
+        Some(HttpProxyState {
+            proxy_state: state.clone(),
+            mitm_ca,
+            upstream_hosts: Arc::new(upstream_hosts),
+        })
+    } else {
+        None
+    };
+
+    let bind_addr = format!("{}:{}", args.host, args.port);
+
+    info!("Listening on {}", bind_addr);
+    info!("Configure cargo to use: sparse+{}/", proxy_base_url);
+
+    // Build the router with optional HTTP proxy fallback
     let app = Router::new()
         // Index config endpoint
         .route("/config.json", get(handle_config))
@@ -100,53 +150,147 @@ async fn main() {
         )
         .with_state(state);
 
-    let bind_addr = format!("{}:{}", args.host, args.port);
+    // Server startup with different modes:
+    // - TLS + proxy: Custom service over TLS for CONNECT support
+    // - TLS only: Simple axum_server TLS
+    // - HTTP + proxy: Custom service over plain TCP
+    // - HTTP only: Simple axum::serve
 
-    info!("Listening on {}", bind_addr);
-    info!("Configure cargo to use: sparse+{}/", proxy_base_url);
+    if let Some(proxy_state) = http_proxy_state {
+        // Proxy mode - use custom service to handle CONNECT and absolute URLs
+        use axum::body::Body;
+        use axum::extract::Request;
+        use axum::response::IntoResponse;
+        use hyper::service::service_fn;
+        use hyper_util::rt::{TokioExecutor, TokioIo};
+        use hyper_util::server::conn::auto::Builder;
+        use std::convert::Infallible;
+        use tower::Service;
 
-    // Start HTTP proxy if configured
-    if let Some(http_proxy_port) = args.http_proxy_port {
-        let http_proxy_addr = format!("{}:{}", args.host, http_proxy_port);
-        let main_proxy_host = args.host.clone();
-        let main_proxy_port = args.port;
+        let listener = tokio::net::TcpListener::bind(&bind_addr)
+            .await
+            .expect("Failed to bind to port");
 
-        info!("Intercepting hosts: {:?}", upstream_hosts);
+        if use_tls {
+            // TLS with proxy support
+            let (cert_pem, key_pem) = if let (Some(cert_path), Some(key_path)) =
+                (&args.tls_cert, &args.tls_key)
+            {
+                info!("Loading TLS certificate from {:?}", cert_path);
+                info!("Loading TLS key from {:?}", key_path);
+                let cert_pem = std::fs::read(cert_path).expect("Failed to read TLS certificate");
+                let key_pem = std::fs::read(key_path).expect("Failed to read TLS key");
+                (cert_pem, key_pem)
+            } else {
+                info!("Generating self-signed TLS certificate");
+                generate_self_signed_cert(&args.host)
+                    .expect("Failed to generate self-signed certificate")
+            };
 
-        // Generate MITM CA certificate
-        let mitm_ca = Arc::new(MitmCa::new().expect("Failed to generate MITM CA certificate"));
+            let certs = rustls_pemfile::certs(&mut cert_pem.as_slice())
+                .collect::<Result<Vec<_>, _>>()
+                .expect("Failed to parse TLS certificate");
+            let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
+                .expect("Failed to parse TLS key")
+                .expect("No private key found");
 
-        // Export CA certificate if requested
-        if let Some(ca_cert_path) = &args.ca_cert_out {
-            std::fs::write(ca_cert_path, mitm_ca.ca_cert_pem())
-                .expect("Failed to write CA certificate");
-            info!("Exported CA certificate to {:?}", ca_cert_path);
-            info!(
-                "Set CARGO_HTTP_CAINFO={:?} to trust the proxy's certificates",
-                ca_cert_path
-            );
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .expect("Failed to create TLS config");
+
+            let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+
+            loop {
+                let (stream, _addr) = listener.accept().await.expect("Failed to accept");
+                let app = app.clone();
+                let proxy_state = proxy_state.clone();
+                let tls_acceptor = tls_acceptor.clone();
+
+                tokio::spawn(async move {
+                    let tls_stream = match tls_acceptor.accept(stream).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::debug!("TLS handshake error: {}", e);
+                            return;
+                        }
+                    };
+
+                    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+                        let mut app = app.clone();
+                        let proxy_state = proxy_state.clone();
+
+                        async move {
+                            let (parts, body) = request.into_parts();
+                            let body = Body::new(body);
+                            let request = Request::from_parts(parts, body);
+
+                            if is_proxy_request(&request) {
+                                let response = handle_proxy_request(
+                                    axum::extract::State(proxy_state),
+                                    request,
+                                )
+                                .await;
+                                Ok::<_, Infallible>(response)
+                            } else {
+                                let response = app.call(request).await.into_response();
+                                Ok::<_, Infallible>(response)
+                            }
+                        }
+                    });
+
+                    let io = TokioIo::new(tls_stream);
+                    if let Err(e) = Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(io, service)
+                        .await
+                    {
+                        log::debug!("Connection error: {}", e);
+                    }
+                });
+            }
+        } else {
+            // HTTP with proxy support
+            loop {
+                let (stream, _addr) = listener.accept().await.expect("Failed to accept");
+                let app = app.clone();
+                let proxy_state = proxy_state.clone();
+
+                tokio::spawn(async move {
+                    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+                        let mut app = app.clone();
+                        let proxy_state = proxy_state.clone();
+
+                        async move {
+                            let (parts, body) = request.into_parts();
+                            let body = Body::new(body);
+                            let request = Request::from_parts(parts, body);
+
+                            if is_proxy_request(&request) {
+                                let response = handle_proxy_request(
+                                    axum::extract::State(proxy_state),
+                                    request,
+                                )
+                                .await;
+                                Ok::<_, Infallible>(response)
+                            } else {
+                                let response = app.call(request).await.into_response();
+                                Ok::<_, Infallible>(response)
+                            }
+                        }
+                    });
+
+                    let io = TokioIo::new(stream);
+                    if let Err(e) = Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(io, service)
+                        .await
+                    {
+                        log::debug!("Connection error: {}", e);
+                    }
+                });
+            }
         }
-
-        info!("Starting HTTP proxy on {}", http_proxy_addr);
-        info!(
-            "Set CARGO_HTTP_PROXY=http://{} to route traffic through proxy",
-            http_proxy_addr
-        );
-
-        tokio::spawn(async move {
-            run_http_proxy(
-                &http_proxy_addr,
-                &main_proxy_host,
-                main_proxy_port,
-                mitm_ca,
-                upstream_hosts,
-            )
-            .await;
-        });
-    }
-
-    if use_tls {
-        // Load or generate TLS configuration
+    } else if use_tls {
+        // TLS without proxy support - use simple axum_server
         let tls_config = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key)
         {
             info!("Loading TLS certificate from {:?}", cert_path);
@@ -169,6 +313,7 @@ async fn main() {
             .await
             .expect("Server error");
     } else {
+        // Simple HTTP mode without proxy support
         let listener = tokio::net::TcpListener::bind(&bind_addr)
             .await
             .expect("Failed to bind to port");

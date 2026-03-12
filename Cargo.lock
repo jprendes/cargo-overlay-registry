@@ -228,6 +228,8 @@ dependencies = [
  "env_logger",
  "futures",
  "http",
+ "hyper",
+ "hyper-util",
  "log",
  "rcgen",
  "reqwest",
@@ -239,6 +241,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tower",
  "url",
 ]
 

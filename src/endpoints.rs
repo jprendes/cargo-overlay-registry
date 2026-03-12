@@ -12,6 +12,39 @@ use crate::registry::{Registry, RegistryError};
 use crate::state::ProxyState;
 use crate::types::{IndexEntry, PublishMetadata, PublishResponse, PublishWarnings, RegistryConfig};
 
+/// Internal response type for HTTP proxy
+pub struct InternalResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl InternalResponse {
+    fn ok_json(body: impl AsRef<[u8]>) -> Self {
+        Self {
+            status: 200,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: body.as_ref().to_vec(),
+        }
+    }
+
+    fn ok_gzip(body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            headers: vec![("content-type".to_string(), "application/gzip".to_string())],
+            body,
+        }
+    }
+
+    fn error(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            headers: vec![("content-type".to_string(), "text/plain".to_string())],
+            body: message.into().into_bytes(),
+        }
+    }
+}
+
 /// Error type for parsing publish requests
 #[derive(Debug)]
 pub enum ParseError {
@@ -372,6 +405,247 @@ async fn proxy_api_request(
                 format!("Failed to connect to upstream: {}", e),
             )
                 .into_response()
+        }
+    }
+}
+
+/// Handle an internal request from the HTTP proxy without going through axum.
+/// Routes based on method and path, returning an InternalResponse.
+pub async fn handle_internal_request(
+    state: &ProxyState,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> InternalResponse {
+    // Route based on path
+    match (method, path) {
+        ("GET", "/config.json") => internal_handle_config(state),
+
+        ("GET", p) if p.starts_with("/1/") => {
+            let name = &p[3..];
+            internal_handle_index_lookup(state, name).await
+        }
+
+        ("GET", p) if p.starts_with("/2/") => {
+            let name = &p[3..];
+            internal_handle_index_lookup(state, name).await
+        }
+
+        ("GET", p) if p.starts_with("/3/") => {
+            // /3/{first_char}/{name}
+            let rest = &p[3..];
+            if let Some(slash_pos) = rest.find('/') {
+                let name = &rest[slash_pos + 1..];
+                internal_handle_index_lookup(state, name).await
+            } else {
+                InternalResponse::error(400, "Invalid path")
+            }
+        }
+
+        ("GET", p)
+            if p.len() > 6
+                && p.chars().nth(3) == Some('/')
+                && p.chars().nth(6) == Some('/') =>
+        {
+            // /{first_two}/{second_two}/{name}
+            let name = &p[7..];
+            internal_handle_index_lookup(state, name).await
+        }
+
+        ("GET", p) if p.starts_with("/api/v1/crates/") && p.ends_with("/download") => {
+            // /api/v1/crates/{crate}/{version}/download
+            let parts: Vec<&str> = p
+                .trim_start_matches("/api/v1/crates/")
+                .trim_end_matches("/download")
+                .split('/')
+                .collect();
+            if parts.len() == 2 {
+                internal_handle_download(state, parts[0], parts[1]).await
+            } else {
+                InternalResponse::error(400, "Invalid download path")
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/v1/crates") => {
+            // Search - proxy to upstream
+            let query = if let Some(q) = p.strip_prefix("/api/v1/crates") {
+                q.to_string()
+            } else {
+                String::new()
+            };
+            internal_handle_search(state, &query, headers).await
+        }
+
+        ("PUT", "/api/v1/crates/new") => internal_handle_publish(state, body).await,
+
+        _ => InternalResponse::error(404, "Not found"),
+    }
+}
+
+fn internal_handle_config(state: &ProxyState) -> InternalResponse {
+    info!("GET /config.json - Serving proxy configuration (internal)");
+
+    let config = RegistryConfig {
+        dl: format!("{}/api/v1/crates", state.proxy_base_url),
+        api: state.proxy_base_url.clone(),
+        auth_required: None,
+    };
+
+    info!("  Response: 200 OK - dl={}, api={}", config.dl, config.api);
+    InternalResponse::ok_json(serde_json::to_string_pretty(&config).unwrap())
+}
+
+async fn internal_handle_index_lookup(state: &ProxyState, crate_name: &str) -> InternalResponse {
+    info!("GET index/{} - Looking up crate (internal)", crate_name);
+
+    match state.registry.lookup(crate_name).await {
+        Ok(entries) => {
+            if entries.is_empty() {
+                info!("  Response: 404 Not Found");
+                return InternalResponse::error(404, "Not found");
+            }
+
+            let body = serialize_index_entries(&entries);
+
+            info!("  Response: 200 OK ({} entries)", entries.len());
+            if body.len() < 1000 {
+                info!("  Body: {}", body.trim());
+            }
+
+            InternalResponse::ok_json(body)
+        }
+        Err(e) => {
+            error!("  Failed to lookup crate: {}", e);
+            InternalResponse::error(502, format!("Failed to lookup crate: {}", e))
+        }
+    }
+}
+
+async fn internal_handle_publish(state: &ProxyState, body: &[u8]) -> InternalResponse {
+    info!(
+        "PUT /api/v1/crates/new ({} bytes) - Publishing locally (internal)",
+        body.len()
+    );
+
+    // Parse the publish request body
+    let (metadata, crate_data) = match parse_publish_body(body) {
+        Ok(result) => result,
+        Err(e) => {
+            error!("  Failed to parse publish body: {}", e);
+            return InternalResponse::error(400, e.to_string());
+        }
+    };
+
+    info!("  Publishing: {} v{}", metadata.name, metadata.vers);
+
+    // Use the Registry trait to publish
+    match state.registry.publish(metadata, crate_data).await {
+        Ok(checksum) => {
+            info!("  Checksum: {}", checksum);
+            info!("  Response: 200 OK");
+
+            let response = PublishResponse {
+                warnings: PublishWarnings {
+                    invalid_categories: vec![],
+                    invalid_badges: vec![],
+                    other: vec![],
+                },
+            };
+
+            InternalResponse::ok_json(serde_json::to_string(&response).unwrap())
+        }
+        Err(RegistryError::ValidationFailed(errors)) => {
+            let msg = errors.join("; ");
+            error!("  Validation failed: {}", msg);
+            InternalResponse::error(400, format!("Validation failed: {}", msg))
+        }
+        Err(e) => {
+            error!("  Failed to publish: {}", e);
+            InternalResponse::error(500, format!("Failed to publish: {}", e))
+        }
+    }
+}
+
+async fn internal_handle_download(
+    state: &ProxyState,
+    crate_name: &str,
+    version: &str,
+) -> InternalResponse {
+    info!(
+        "GET /api/v1/crates/{}/{}/download (internal)",
+        crate_name, version
+    );
+
+    match state.registry.download(crate_name, version).await {
+        Ok(data) => {
+            info!("  Response: 200 OK ({} bytes)", data.len());
+            InternalResponse::ok_gzip(data)
+        }
+        Err(RegistryError::NotFound) => {
+            info!("  Response: 404 Not Found");
+            InternalResponse::error(404, "Crate not found")
+        }
+        Err(e) => {
+            error!("  Failed to download: {}", e);
+            InternalResponse::error(502, format!("Failed to download: {}", e))
+        }
+    }
+}
+
+async fn internal_handle_search(
+    state: &ProxyState,
+    query: &str,
+    headers: &[(String, String)],
+) -> InternalResponse {
+    let url = format!("{}/api/v1/crates{}", state.upstream_api(), query);
+    info!("GET /api/v1/crates{} -> {} (internal)", query, url);
+
+    let mut request = state.client.get(&url);
+
+    // Forward authorization header
+    for (name, value) in headers {
+        if name.to_lowercase() == "authorization" {
+            request = request.header("Authorization", value);
+            info!("  Forwarding Authorization header");
+        } else if name.to_lowercase() == "accept" {
+            request = request.header("Accept", value);
+        }
+    }
+
+    match request.send().await {
+        Ok(response) => {
+            let status = response.status();
+            info!(
+                "  Response: {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("")
+            );
+
+            let mut resp_headers = Vec::new();
+            for (key, value) in response.headers().iter() {
+                if key != "transfer-encoding" && key != "connection" {
+                    if let Ok(v) = value.to_str() {
+                        resp_headers.push((key.to_string(), v.to_string()));
+                    }
+                }
+            }
+
+            match response.bytes().await {
+                Ok(body) => InternalResponse {
+                    status: status.as_u16(),
+                    headers: resp_headers,
+                    body: body.to_vec(),
+                },
+                Err(e) => {
+                    error!("  Failed to read response body: {}", e);
+                    InternalResponse::error(502, format!("Failed to read upstream response: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            error!("  Failed to connect to upstream: {}", e);
+            InternalResponse::error(502, format!("Failed to connect to upstream: {}", e))
         }
     }
 }

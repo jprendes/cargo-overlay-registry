@@ -63,7 +63,6 @@ fn build_proxy_binary() -> PathBuf {
 pub struct ProxyTestHelper {
     process: Child,
     port: u16,
-    http_proxy_port: u16,
     ca_cert_path: PathBuf,
     cargo_home: PathBuf,
     #[allow(dead_code)]
@@ -85,9 +84,8 @@ impl ProxyTestHelper {
     pub fn with_args(test_name: &str, extra_args: &[&str]) -> Self {
         let proxy_binary = build_proxy_binary();
 
-        // Find available ports
+        // Find available port (same port for registry and HTTP proxy)
         let port = find_available_port();
-        let http_proxy_port = find_available_port();
 
         // Create temporary directory for test artifacts
         let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
@@ -104,7 +102,7 @@ impl ProxyTestHelper {
 
         let ca_cert_path = temp_path.join(format!("{}-ca-cert.pem", test_name));
 
-        // Build args
+        // Build args - HTTP proxy is enabled by default
         let mut args = vec![
             "--port",
             &port.to_string(),
@@ -112,8 +110,6 @@ impl ProxyTestHelper {
             "127.0.0.1",
             "--registry-path",
             registry_path.to_str().unwrap(),
-            "--http-proxy-port",
-            &http_proxy_port.to_string(),
             "--ca-cert-out",
             ca_cert_path.to_str().unwrap(),
             "--base-url",
@@ -138,7 +134,6 @@ impl ProxyTestHelper {
         let helper = Self {
             process,
             port,
-            http_proxy_port,
             ca_cert_path,
             cargo_home,
             target_dir,
@@ -147,14 +142,10 @@ impl ProxyTestHelper {
             _temp_dir: temp_dir,
         };
 
-        // Wait for servers to be ready
+        // Wait for server to be ready
         assert!(
             wait_for_server("127.0.0.1", helper.port, Duration::from_secs(10)),
             "Proxy server failed to start within timeout"
-        );
-        assert!(
-            wait_for_server("127.0.0.1", helper.http_proxy_port, Duration::from_secs(10)),
-            "HTTP proxy failed to start within timeout"
         );
 
         helper
@@ -162,7 +153,7 @@ impl ProxyTestHelper {
 
     /// Returns a `Command` for running cargo with all proxy configuration set.
     pub fn cargo_command(&self) -> Command {
-        let http_proxy_url = format!("http://127.0.0.1:{}", self.http_proxy_port);
+        let http_proxy_url = format!("http://127.0.0.1:{}", self.port);
         let mut cmd = Command::new("cargo");
         cmd.env("CARGO_HOME", &self.cargo_home)
             .env("CARGO_TARGET_DIR", &self.target_dir)

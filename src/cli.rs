@@ -16,13 +16,12 @@ pub struct Args {
     pub host: String,
 
     /// Base URL for the proxy (used in config.json)
-    /// Defaults to http://localhost:<port>
-    #[arg(short, long)]
-    pub base_url: Option<String>,
+    #[arg(short, long, default_value = "https://crates.io")]
+    pub base_url: String,
 
-    /// Path to store locally published crates
-    #[arg(short, long, default_value = "./local-registry")]
-    pub registry_path: PathBuf,
+    /// Path to store locally published crates (defaults to a temporary directory)
+    #[arg(short, long)]
+    pub registry_path: Option<PathBuf>,
 
     /// Upstream registry sparse index URL
     #[arg(long, default_value = "https://index.crates.io")]
@@ -32,10 +31,10 @@ pub struct Args {
     #[arg(long, default_value = "https://crates.io")]
     pub upstream_api: String,
 
-    /// Optional HTTP proxy port (for CARGO_HTTP_PROXY)
-    /// When set, starts an HTTP forward proxy that intercepts traffic
+    /// Disable proxy mode (CONNECT handling with MITM)
+    /// By default, the server acts as a forward proxy for cargo (HTTP or HTTPS)
     #[arg(long)]
-    pub http_proxy_port: Option<u16>,
+    pub no_proxy: bool,
 
     /// Path to export CA certificate (PEM format) for MITM interception
     /// Use with CARGO_HTTP_CAINFO to make cargo trust the proxy's certificates

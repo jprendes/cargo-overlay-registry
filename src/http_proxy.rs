@@ -1,197 +1,128 @@
 use std::sync::Arc;
 
+use axum::{
+    body::Body,
+    extract::{Request, State},
+    http::{Method, StatusCode},
+    response::Response,
+};
+use hyper_util::rt::TokioIo;
 use log::{debug, error, info};
 use rustls::ServerConfig;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 
-use crate::state::MitmCa;
+use crate::endpoints::{handle_internal_request, InternalResponse};
+use crate::state::{MitmCa, ProxyState};
 
-/// Run the HTTP proxy server
-pub async fn run_http_proxy(
-    bind_addr: &str,
-    main_proxy_host: &str,
-    main_proxy_port: u16,
-    mitm_ca: Arc<MitmCa>,
-    upstream_hosts: Vec<String>,
-) {
-    let listener = match tokio::net::TcpListener::bind(bind_addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to bind HTTP proxy to {}: {}", bind_addr, e);
-            return;
-        }
-    };
+/// Shared state for the HTTP proxy functionality
+#[derive(Clone)]
+pub struct HttpProxyState {
+    pub proxy_state: Arc<ProxyState>,
+    pub mitm_ca: Arc<MitmCa>,
+    pub upstream_hosts: Arc<Vec<String>>,
+}
 
-    info!("HTTP proxy listening on {}", bind_addr);
-    let upstream_hosts = Arc::new(upstream_hosts);
+/// Handle incoming requests - routes CONNECT and proxy-style requests
+pub async fn handle_proxy_request(
+    State(state): State<HttpProxyState>,
+    request: Request,
+) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                debug!("HTTP proxy: connection from {}", addr);
-                let main_host = main_proxy_host.to_string();
-                let main_port = main_proxy_port;
-                let ca = mitm_ca.clone();
-                let hosts = upstream_hosts.clone();
-                tokio::spawn(async move {
-                    if let Err(e) =
-                        handle_http_proxy_connection(stream, &main_host, main_port, ca, hosts).await
-                    {
-                        debug!("HTTP proxy connection error: {}", e);
-                    }
-                });
-            }
-            Err(e) => {
-                error!("HTTP proxy accept error: {}", e);
-            }
-        }
+    if method == Method::CONNECT {
+        // Handle CONNECT request for HTTPS tunneling
+        handle_connect(state, request).await
+    } else if uri.scheme().is_some() {
+        // Proxy-style request with absolute URL (e.g., GET http://example.com/path)
+        handle_forward_request(state, request).await
+    } else {
+        // This shouldn't happen - regular requests go to axum routes
+        Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("Invalid proxy request"))
+            .unwrap()
     }
 }
 
-/// Handle a single HTTP proxy connection (supports keep-alive for multiple requests)
-async fn handle_http_proxy_connection(
-    stream: TcpStream,
-    main_proxy_host: &str,
-    main_proxy_port: u16,
-    mitm_ca: Arc<MitmCa>,
-    upstream_hosts: Arc<Vec<String>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
-    let (read_half, mut write_half) = tokio::io::split(stream);
-    let mut buf_reader = BufReader::new(read_half);
-
-    // Create a shared reqwest client for all requests on this connection
-    let client = reqwest::Client::builder()
-        .user_agent("cargo-overlay-registry-http-proxy/0.1.0")
-        .build()?;
-
-    loop {
-        // Read the HTTP request line
-        let mut request_line = String::new();
-        match buf_reader.read_line(&mut request_line).await {
-            Ok(0) => break, // Connection closed
-            Ok(_) => {}
-            Err(e) => {
-                debug!("Error reading from HTTP proxy stream: {}", e);
-                break;
-            }
-        }
-
-        if request_line.trim().is_empty() {
-            continue;
-        }
-
-        debug!("HTTP proxy request: {}", request_line.trim());
-
-        let parts: Vec<&str> = request_line.split_whitespace().collect();
-        if parts.len() < 3 {
-            write_half
-                .write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
-                .await?;
-            break;
-        }
-
-        let method = parts[0].to_string();
-        let target = parts[1].to_string();
-
-        // Read headers
-        let mut headers = Vec::new();
-        loop {
-            let mut line = String::new();
-            match buf_reader.read_line(&mut line).await {
-                Ok(0) => break,
-                Ok(_) => {
-                    if line.trim().is_empty() {
-                        break;
-                    }
-                    headers.push(line.trim().to_string());
-                }
-                Err(_) => break,
-            }
-        }
-
-        if method == "CONNECT" {
-            // For CONNECT, we need to reunite the stream and hand off to tunnel handler
-            // This consumes the connection, so we return after handling
-            let inner = buf_reader.into_inner();
-            let stream = inner.unsplit(write_half);
-            return handle_connect_tunnel(
-                stream,
-                &target,
-                main_proxy_host,
-                main_proxy_port,
-                mitm_ca,
-                upstream_hosts,
-            )
-            .await;
-        }
-
-        // Handle regular HTTP request with keep-alive support
-        let should_close = handle_http_forward_request(
-            &mut buf_reader,
-            &mut write_half,
-            &client,
-            &method,
-            &target,
-            &headers,
-            main_proxy_host,
-            main_proxy_port,
-            &upstream_hosts,
-        )
-        .await?;
-
-        if should_close {
-            break;
-        }
-    }
-
-    Ok(())
+/// Check if a request should be handled by the proxy layer
+pub fn is_proxy_request(request: &Request) -> bool {
+    request.method() == Method::CONNECT || request.uri().scheme().is_some()
 }
 
-/// Handle CONNECT method (HTTPS tunneling)
-/// For upstream registry domains, we perform MITM TLS interception to route through our proxy
-async fn handle_connect_tunnel(
-    stream: TcpStream,
-    target: &str,
-    main_proxy_host: &str,
-    main_proxy_port: u16,
-    mitm_ca: Arc<MitmCa>,
-    upstream_hosts: Arc<Vec<String>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// Handle CONNECT method for HTTPS tunneling
+async fn handle_connect(state: HttpProxyState, request: Request) -> Response {
+    let target = request.uri().to_string();
+
     // Parse target as host:port
-    let (host, port) = if let Some(colon_pos) = target.rfind(':') {
-        let h = &target[..colon_pos];
+    let (host, port) = if let Some(authority) = request.uri().authority() {
+        let h = authority.host().to_string();
+        let p = authority.port_u16().unwrap_or(443);
+        (h, p)
+    } else if let Some(colon_pos) = target.rfind(':') {
+        let h = target[..colon_pos].to_string();
         let p: u16 = target[colon_pos + 1..].parse().unwrap_or(443);
         (h, p)
     } else {
-        (target, 443u16)
+        (target.clone(), 443u16)
     };
 
     // Check if this is an upstream registry domain that we should intercept
-    let should_intercept = upstream_hosts.iter().any(|upstream_host| {
-        host == upstream_host || host.ends_with(&format!(".{}", upstream_host))
+    let should_intercept = state.upstream_hosts.iter().any(|upstream_host| {
+        host == upstream_host.as_str() || host.ends_with(&format!(".{}", upstream_host))
     });
 
     if should_intercept {
-        info!("HTTP proxy CONNECT MITM interception for {}:{}", host, port);
-        handle_connect_mitm(stream, host, main_proxy_host, main_proxy_port, mitm_ca).await
+        info!(
+            "HTTP proxy CONNECT MITM interception for {}:{}",
+            host, port
+        );
     } else {
         info!("HTTP proxy CONNECT tunnel to {}:{}", host, port);
-        handle_connect_passthrough(stream, host, port).await
     }
+
+    // Spawn task to handle the upgraded connection
+    let host_clone = host.clone();
+    tokio::spawn(async move {
+        match hyper::upgrade::on(request).await {
+            Ok(upgraded) => {
+                // TokioIo wraps the upgraded connection to implement tokio's AsyncRead/AsyncWrite
+                let stream = TokioIo::new(upgraded);
+
+                let result = if should_intercept {
+                    handle_connect_mitm(stream, &host_clone, state.proxy_state, state.mitm_ca).await
+                } else {
+                    handle_connect_passthrough(stream, &host_clone, port).await
+                };
+
+                if let Err(e) = result {
+                    debug!("CONNECT tunnel error: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Connection upgrade failed: {}", e);
+            }
+        }
+    });
+
+    // Return 200 Connection Established
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// Handle CONNECT with MITM TLS interception for upstream registry domains
-async fn handle_connect_mitm(
-    mut stream: TcpStream,
+async fn handle_connect_mitm<S>(
+    stream: S,
     host: &str,
-    main_proxy_host: &str,
-    main_proxy_port: u16,
+    state: Arc<ProxyState>,
     mitm_ca: Arc<MitmCa>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     // Generate a certificate for the target domain, signed by our CA
@@ -209,12 +140,8 @@ async fn handle_connect_mitm(
 
     let acceptor = TlsAcceptor::from(std::sync::Arc::new(server_config));
 
-    // Send 200 Connection Established before TLS handshake
-    stream
-        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-        .await?;
-
-    // Perform TLS handshake with client
+    // Wrap the stream for TLS
+    // Note: For upgraded connections, we need to use a type-erased wrapper
     let tls_stream = match acceptor.accept(stream).await {
         Ok(s) => s,
         Err(e) => {
@@ -224,11 +151,6 @@ async fn handle_connect_mitm(
     };
 
     info!("  TLS handshake completed for {}", host);
-
-    // Create a shared reqwest client for all requests on this connection
-    let client = reqwest::Client::builder()
-        .user_agent("cargo-overlay-registry-mitm/0.1.0")
-        .build()?;
 
     // Split the TLS stream for reading and writing
     let (read_half, mut write_half) = tokio::io::split(tls_stream);
@@ -249,7 +171,6 @@ async fn handle_connect_mitm(
         }
 
         if request_line.trim().is_empty() {
-            // Empty line might just be keep-alive probe, continue
             continue;
         }
 
@@ -311,85 +232,38 @@ async fn handle_connect_mitm(
 
         info!("  MITM {} https://{}{}", method, host, path);
 
-        // Rewrite to our proxy
-        let proxy_url = format!("http://{}:{}{}", main_proxy_host, main_proxy_port, path);
-        info!("    -> Rewriting to: {}", proxy_url);
+        // Convert headers to the format expected by handle_internal_request
+        let header_pairs: Vec<(String, String)> = headers
+            .iter()
+            .filter_map(|h| {
+                let pos = h.find(':')?;
+                Some((h[..pos].trim().to_string(), h[pos + 1..].trim().to_string()))
+            })
+            .collect();
 
-        let request = match method {
-            "GET" => client.get(&proxy_url),
-            "POST" => client.post(&proxy_url).body(body),
-            "PUT" => client.put(&proxy_url).body(body),
-            "DELETE" => client.delete(&proxy_url),
-            "HEAD" => client.head(&proxy_url),
-            _ => {
-                let response = b"HTTP/1.1 405 Method Not Allowed\r\n\r\n";
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, response).await?;
-                continue;
-            }
-        };
+        // Handle internally
+        info!("    -> Handling internally");
+        let response = handle_internal_request(&state, method, path, &header_pairs, &body).await;
 
-        // Forward relevant headers
-        let mut request = request;
-        for header in &headers {
-            if let Some(colon_pos) = header.find(':') {
-                let name = header[..colon_pos].trim();
-                let value = header[colon_pos + 1..].trim();
-                if !["host", "connection", "content-length"].contains(&name.to_lowercase().as_str())
-                {
-                    request = request.header(name, value);
-                }
-            }
+        // Write response
+        let status_line = format!("HTTP/1.1 {} OK\r\n", response.status);
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, status_line.as_bytes()).await?;
+
+        for (name, value) in &response.headers {
+            let header_line = format!("{}: {}\r\n", name, value);
+            tokio::io::AsyncWriteExt::write_all(&mut write_half, header_line.as_bytes()).await?;
         }
 
-        match request.send().await {
-            Ok(response) => {
-                let status = response.status();
-                let mut response_headers = String::new();
+        let content_length_header = format!("content-length: {}\r\n", response.body.len());
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, content_length_header.as_bytes())
+            .await?;
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, b"connection: keep-alive\r\n")
+            .await?;
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, b"\r\n").await?;
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, &response.body).await?;
+        tokio::io::AsyncWriteExt::flush(&mut write_half).await?;
 
-                for (key, value) in response.headers().iter() {
-                    if key != "transfer-encoding" && key != "connection" {
-                        response_headers.push_str(&format!(
-                            "{}: {}\r\n",
-                            key,
-                            value.to_str().unwrap_or("")
-                        ));
-                    }
-                }
-
-                let body = response.bytes().await.unwrap_or_default();
-
-                let status_line = format!(
-                    "HTTP/1.1 {} {}\r\n",
-                    status.as_u16(),
-                    status.canonical_reason().unwrap_or("OK")
-                );
-                let content_length_header = format!("content-length: {}\r\n", body.len());
-
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, status_line.as_bytes())
-                    .await?;
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, response_headers.as_bytes())
-                    .await?;
-                tokio::io::AsyncWriteExt::write_all(
-                    &mut write_half,
-                    content_length_header.as_bytes(),
-                )
-                .await?;
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, b"connection: keep-alive\r\n")
-                    .await?;
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, b"\r\n").await?;
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, &body).await?;
-                tokio::io::AsyncWriteExt::flush(&mut write_half).await?;
-
-                info!("    <- {} ({} bytes)", status.as_u16(), body.len());
-            }
-            Err(e) => {
-                error!("    <- Error: {}", e);
-                let response =
-                    b"HTTP/1.1 502 Bad Gateway\r\nconnection: keep-alive\r\ncontent-length: 0\r\n\r\n";
-                tokio::io::AsyncWriteExt::write_all(&mut write_half, response).await?;
-                tokio::io::AsyncWriteExt::flush(&mut write_half).await?;
-            }
-        }
+        info!("    <- {} ({} bytes)", response.status, response.body.len());
 
         // Check for Connection: close
         let should_close = headers.iter().any(|h| {
@@ -405,18 +279,17 @@ async fn handle_connect_mitm(
 }
 
 /// Handle CONNECT with direct passthrough (no interception)
-async fn handle_connect_passthrough(
-    mut stream: TcpStream,
+async fn handle_connect_passthrough<S>(
+    stream: S,
     host: &str,
     port: u16,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
     let upstream_addr = format!("{}:{}", host, port);
     match TcpStream::connect(&upstream_addr).await {
         Ok(upstream) => {
-            stream
-                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                .await?;
-
             let (mut client_read, mut client_write) = tokio::io::split(stream);
             let (mut upstream_read, mut upstream_write) = tokio::io::split(upstream);
 
@@ -435,129 +308,103 @@ async fn handle_connect_passthrough(
         }
         Err(e) => {
             error!("HTTP proxy: failed to connect to {}: {}", upstream_addr, e);
-            stream
-                .write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                .await?;
+            // Can't really send a response here since client expects raw tunnel
+            // Just close the connection
         }
     }
 
     Ok(())
 }
 
-/// Handle regular HTTP request (forward proxy) - returns true if connection should close
-#[allow(clippy::too_many_arguments)]
-async fn handle_http_forward_request<R, W>(
-    buf_reader: &mut tokio::io::BufReader<R>,
-    write_half: &mut W,
-    client: &reqwest::Client,
-    method: &str,
-    target: &str,
-    headers: &[String],
-    main_proxy_host: &str,
-    main_proxy_port: u16,
-    upstream_hosts: &[String],
-) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    use tokio::io::AsyncWriteExt;
-
-    // Parse the target URL
-    let url = if target.starts_with("http://") || target.starts_with("https://") {
-        target.to_string()
-    } else {
-        // Relative URL - need Host header
-        let host = headers
-            .iter()
-            .find(|h| h.to_lowercase().starts_with("host:"))
-            .and_then(|h| h.split(':').nth(1))
-            .map(|s| s.trim())
-            .unwrap_or("localhost");
-        format!("http://{}{}", host, target)
-    };
+/// Handle regular HTTP proxy request (forward proxy with absolute URL)
+async fn handle_forward_request(state: HttpProxyState, request: Request) -> Response {
+    let method = request.method().clone();
+    let url = request.uri().to_string();
 
     info!("HTTP proxy {} request to {}", method, url);
 
-    // Check for Expect: 100-continue header and respond before reading body
-    let expects_continue = headers.iter().any(|h| {
-        h.to_lowercase().starts_with("expect:") && h.to_lowercase().contains("100-continue")
-    });
-
-    if expects_continue {
-        write_half
-            .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
-            .await?;
-        write_half.flush().await?;
-        debug!("  Sent 100 Continue");
-    }
-
-    // Check if this is an upstream registry URL and rewrite it
-    let should_rewrite = url::Url::parse(&url).ok().is_some_and(|parsed| {
+    // Check if this is an upstream registry URL that should be intercepted
+    let should_intercept = url::Url::parse(&url).ok().is_some_and(|parsed| {
         parsed.host_str().is_some_and(|url_host| {
-            upstream_hosts.iter().any(|upstream_host| {
-                url_host == upstream_host || url_host.ends_with(&format!(".{}", upstream_host))
+            state.upstream_hosts.iter().any(|upstream_host| {
+                url_host == upstream_host.as_str()
+                    || url_host.ends_with(&format!(".{}", upstream_host))
             })
         })
     });
 
-    let final_url = if should_rewrite {
-        // Rewrite to main proxy
-        if let Ok(parsed) = url::Url::parse(&url) {
-            let path = parsed.path();
-            let query = parsed
-                .query()
-                .map(|q| format!("?{}", q))
-                .unwrap_or_default();
-            let rewritten = format!(
-                "http://{}:{}{}{}",
-                main_proxy_host, main_proxy_port, path, query
-            );
-            info!("  -> Rewriting to: {}", rewritten);
-            rewritten
-        } else {
-            url.clone()
-        }
-    } else {
-        url.clone()
-    };
-
-    // Get content length if present
-    let content_length: usize = headers
-        .iter()
-        .find(|h| h.to_lowercase().starts_with("content-length:"))
-        .and_then(|h| h.split(':').nth(1))
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
-
-    // Read body if present
-    let body = if content_length > 0 {
-        let mut body = vec![0u8; content_length];
-        tokio::io::AsyncReadExt::read_exact(buf_reader, &mut body).await?;
-        body
-    } else {
-        Vec::new()
-    };
-
-    let request = match method {
-        "GET" => client.get(&final_url),
-        "POST" => client.post(&final_url).body(body),
-        "PUT" => client.put(&final_url).body(body),
-        "DELETE" => client.delete(&final_url),
-        "HEAD" => client.head(&final_url),
-        _ => {
-            write_half.write_all(b"HTTP/1.1 405 Method Not Allowed\r\nconnection: keep-alive\r\ncontent-length: 0\r\n\r\n").await?;
-            return Ok(false);
+    // Get the body
+    let (parts, body) = request.into_parts();
+    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(b) => b.to_vec(),
+        Err(e) => {
+            error!("Failed to read request body: {}", e);
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("Failed to read body"))
+                .unwrap();
         }
     };
 
-    // Forward relevant headers
-    let mut request = request;
-    for header in headers {
-        if let Some(colon_pos) = header.find(':') {
-            let name = header[..colon_pos].trim();
-            let value = header[colon_pos + 1..].trim();
-            // Skip hop-by-hop headers and host (we're rewriting)
+    if should_intercept {
+        // Handle internally
+        let parsed = match url::Url::parse(&url) {
+            Ok(u) => u,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from("Invalid URL"))
+                    .unwrap();
+            }
+        };
+        let path = parsed.path();
+        let query = parsed
+            .query()
+            .map(|q| format!("?{}", q))
+            .unwrap_or_default();
+        let full_path = format!("{}{}", path, query);
+
+        info!("  -> Handling internally: {}", full_path);
+
+        // Convert headers
+        let header_pairs: Vec<(String, String)> = parts
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or("").to_string(),
+                )
+            })
+            .collect();
+
+        let internal_response =
+            handle_internal_request(&state.proxy_state, method.as_str(), &full_path, &header_pairs, &body_bytes).await;
+
+        convert_internal_response(internal_response)
+    } else {
+        // Passthrough to upstream
+        let client = &state.proxy_state.client;
+
+        let request_builder = match method {
+            Method::GET => client.get(&url),
+            Method::POST => client.post(&url).body(body_bytes),
+            Method::PUT => client.put(&url).body(body_bytes),
+            Method::DELETE => client.delete(&url),
+            Method::HEAD => client.head(&url),
+            _ => {
+                return Response::builder()
+                    .status(StatusCode::METHOD_NOT_ALLOWED)
+                    .body(Body::empty())
+                    .unwrap();
+            }
+        };
+
+        // Forward relevant headers
+        let mut request_builder = request_builder;
+        for (name, value) in parts.headers.iter() {
+            let name_str = name.to_string().to_lowercase();
+            // Skip hop-by-hop headers
             if ![
                 "host",
                 "connection",
@@ -569,54 +416,58 @@ where
                 "upgrade",
                 "expect",
             ]
-            .contains(&name.to_lowercase().as_str())
+            .contains(&name_str.as_str())
             {
-                request = request.header(name, value);
-            }
-        }
-    }
-
-    match request.send().await {
-        Ok(response) => {
-            let status = response.status();
-            let status_line = format!(
-                "HTTP/1.1 {} {}\r\n",
-                status.as_u16(),
-                status.canonical_reason().unwrap_or("OK")
-            );
-            write_half.write_all(status_line.as_bytes()).await?;
-
-            // Write response headers
-            for (key, value) in response.headers().iter() {
-                if key != "transfer-encoding" && key != "connection" {
-                    let header_line = format!("{}: {}\r\n", key, value.to_str().unwrap_or(""));
-                    write_half.write_all(header_line.as_bytes()).await?;
+                if let Ok(val_str) = value.to_str() {
+                    request_builder = request_builder.header(name.clone(), val_str);
                 }
             }
-
-            // Get body
-            let body = response.bytes().await?;
-
-            // Write content-length, connection keep-alive and body
-            let cl_header = format!(
-                "content-length: {}\r\nconnection: keep-alive\r\n\r\n",
-                body.len()
-            );
-            write_half.write_all(cl_header.as_bytes()).await?;
-            write_half.write_all(&body).await?;
-            write_half.flush().await?;
         }
-        Err(e) => {
-            error!("HTTP proxy: upstream request failed: {}", e);
-            write_half.write_all(b"HTTP/1.1 502 Bad Gateway\r\nconnection: keep-alive\r\ncontent-length: 0\r\n\r\n").await?;
-            write_half.flush().await?;
+
+        match request_builder.send().await {
+            Ok(upstream_response) => {
+                let status = upstream_response.status();
+                let mut response_builder = Response::builder().status(status);
+
+                // Copy headers
+                for (key, value) in upstream_response.headers().iter() {
+                    if key != "transfer-encoding" && key != "connection" {
+                        response_builder =
+                            response_builder.header(key.clone(), value.clone());
+                    }
+                }
+
+                match upstream_response.bytes().await {
+                    Ok(body_bytes) => response_builder.body(Body::from(body_bytes)).unwrap(),
+                    Err(e) => {
+                        error!("Failed to read upstream response: {}", e);
+                        Response::builder()
+                            .status(StatusCode::BAD_GATEWAY)
+                            .body(Body::empty())
+                            .unwrap()
+                    }
+                }
+            }
+            Err(e) => {
+                error!("HTTP proxy: upstream request failed: {}", e);
+                Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .body(Body::empty())
+                    .unwrap()
+            }
         }
     }
+}
 
-    // Check for Connection: close
-    let should_close = headers
-        .iter()
-        .any(|h| h.to_lowercase().starts_with("connection:") && h.to_lowercase().contains("close"));
+/// Convert InternalResponse to axum Response
+fn convert_internal_response(internal: InternalResponse) -> Response {
+    let mut builder = Response::builder().status(
+        StatusCode::from_u16(internal.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+    );
 
-    Ok(should_close)
+    for (name, value) in internal.headers {
+        builder = builder.header(name, value);
+    }
+
+    builder.body(Body::from(internal.body)).unwrap()
 }
