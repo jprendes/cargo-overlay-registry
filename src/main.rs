@@ -158,13 +158,14 @@ async fn main() {
 
     if let Some(proxy_state) = http_proxy_state {
         // Proxy mode - use custom service to handle CONNECT and absolute URLs
+        use std::convert::Infallible;
+
         use axum::body::Body;
         use axum::extract::Request;
         use axum::response::IntoResponse;
         use hyper::service::service_fn;
         use hyper_util::rt::{TokioExecutor, TokioIo};
         use hyper_util::server::conn::auto::Builder;
-        use std::convert::Infallible;
         use tower::Service;
 
         let listener = tokio::net::TcpListener::bind(&bind_addr)

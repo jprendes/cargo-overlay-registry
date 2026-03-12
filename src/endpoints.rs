@@ -444,9 +444,7 @@ pub async fn handle_internal_request(
         }
 
         ("GET", p)
-            if p.len() > 6
-                && p.chars().nth(3) == Some('/')
-                && p.chars().nth(6) == Some('/') =>
+            if p.len() > 6 && p.chars().nth(3) == Some('/') && p.chars().nth(6) == Some('/') =>
         {
             // /{first_two}/{second_two}/{name}
             let name = &p[7..];
@@ -624,10 +622,11 @@ async fn internal_handle_search(
 
             let mut resp_headers = Vec::new();
             for (key, value) in response.headers().iter() {
-                if key != "transfer-encoding" && key != "connection" {
-                    if let Ok(v) = value.to_str() {
-                        resp_headers.push((key.to_string(), v.to_string()));
-                    }
+                if key != "transfer-encoding"
+                    && key != "connection"
+                    && let Ok(v) = value.to_str()
+                {
+                    resp_headers.push((key.to_string(), v.to_string()));
                 }
             }
 

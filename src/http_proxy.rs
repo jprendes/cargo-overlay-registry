@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use axum::{
-    body::Body,
-    extract::{Request, State},
-    http::{Method, StatusCode},
-    response::Response,
-};
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::http::{Method, StatusCode};
+use axum::response::Response;
 use hyper_util::rt::TokioIo;
 use log::{debug, error, info};
 use rustls::ServerConfig;
@@ -74,10 +72,7 @@ async fn handle_connect(state: HttpProxyState, request: Request) -> Response {
     });
 
     if should_intercept {
-        info!(
-            "HTTP proxy CONNECT MITM interception for {}:{}",
-            host, port
-        );
+        info!("HTTP proxy CONNECT MITM interception for {}:{}", host, port);
     } else {
         info!("HTTP proxy CONNECT tunnel to {}:{}", host, port);
     }
@@ -257,8 +252,7 @@ where
         let content_length_header = format!("content-length: {}\r\n", response.body.len());
         tokio::io::AsyncWriteExt::write_all(&mut write_half, content_length_header.as_bytes())
             .await?;
-        tokio::io::AsyncWriteExt::write_all(&mut write_half, b"connection: keep-alive\r\n")
-            .await?;
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, b"connection: keep-alive\r\n").await?;
         tokio::io::AsyncWriteExt::write_all(&mut write_half, b"\r\n").await?;
         tokio::io::AsyncWriteExt::write_all(&mut write_half, &response.body).await?;
         tokio::io::AsyncWriteExt::flush(&mut write_half).await?;
@@ -370,16 +364,17 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
         let header_pairs: Vec<(String, String)> = parts
             .headers
             .iter()
-            .map(|(name, value)| {
-                (
-                    name.to_string(),
-                    value.to_str().unwrap_or("").to_string(),
-                )
-            })
+            .map(|(name, value)| (name.to_string(), value.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let internal_response =
-            handle_internal_request(&state.proxy_state, method.as_str(), &full_path, &header_pairs, &body_bytes).await;
+        let internal_response = handle_internal_request(
+            &state.proxy_state,
+            method.as_str(),
+            &full_path,
+            &header_pairs,
+            &body_bytes,
+        )
+        .await;
 
         convert_internal_response(internal_response)
     } else {
@@ -417,10 +412,9 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
                 "expect",
             ]
             .contains(&name_str.as_str())
+                && let Ok(val_str) = value.to_str()
             {
-                if let Ok(val_str) = value.to_str() {
-                    request_builder = request_builder.header(name.clone(), val_str);
-                }
+                request_builder = request_builder.header(name.clone(), val_str);
             }
         }
 
@@ -432,8 +426,7 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
                 // Copy headers
                 for (key, value) in upstream_response.headers().iter() {
                     if key != "transfer-encoding" && key != "connection" {
-                        response_builder =
-                            response_builder.header(key.clone(), value.clone());
+                        response_builder = response_builder.header(key.clone(), value.clone());
                     }
                 }
 
@@ -461,9 +454,8 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
 
 /// Convert InternalResponse to axum Response
 fn convert_internal_response(internal: InternalResponse) -> Response {
-    let mut builder = Response::builder().status(
-        StatusCode::from_u16(internal.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-    );
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(internal.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
 
     for (name, value) in internal.headers {
         builder = builder.header(name, value);
