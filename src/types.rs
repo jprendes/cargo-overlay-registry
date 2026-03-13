@@ -171,12 +171,16 @@ pub struct IndexEntry {
     pub deps: Vec<IndexDependency>,
     pub cksum: String,
     pub features: HashMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub features2: HashMap<String, Vec<String>>,
     #[serde(default)]
     pub yanked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rust_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub v: Option<u32>,
 }
 
 /// Dependency in index entry

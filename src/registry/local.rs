@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
@@ -133,9 +134,11 @@ impl Registry for LocalRegistry {
                 .collect(),
             cksum: checksum.clone(),
             features: metadata.features,
+            features2: HashMap::new(),
             yanked: false,
             links: metadata.links,
             rust_version: metadata.rust_version,
+            v: None,
         };
 
         // Write to index
