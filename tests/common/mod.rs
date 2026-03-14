@@ -116,6 +116,7 @@ impl ProxyTestHelper {
 
         // Build args - HTTP proxy is enabled by default
         // Use the new -r flag for registry specification
+        // TLS is off for tests (cargo_command uses http:// proxy URL)
         let registry_arg = format!("local={}", registry_path.to_str().unwrap());
         let mut args = vec![
             "--port",
@@ -130,6 +131,7 @@ impl ProxyTestHelper {
             ca_cert_path.to_str().unwrap(),
             "--base-url",
             "https://crates.io",
+            "--no-tls",
         ]
         .into_iter()
         .map(String::from)

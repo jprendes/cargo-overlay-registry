@@ -43,14 +43,16 @@ cargo install --path .
 ### 1. Start the overlay
 
 ```bash
-cargo-overlay-registry --ca-cert-out ./ca-cert.pem
+cargo-overlay-registry
 ```
 
 ### 2. Configure cargo
 
+Set the environment variables shown in the server output:
+
 ```bash
-export CARGO_HTTP_PROXY="http://127.0.0.1:8080"
-export CARGO_HTTP_CAINFO="./ca-cert.pem"
+export CARGO_HTTP_PROXY="https://127.0.0.1:8080"
+export CARGO_HTTP_CAINFO="/tmp/cargo-overlay-registry-ca.pem"
 export CARGO_REGISTRY_TOKEN=dummy
 ```
 
@@ -108,9 +110,9 @@ This ensures build scripts can resolve workspace crates that have been packaged 
 | `--registry` | `-r` | `local` + `crates.io` | Registry layers (see below) |
 | `--no-proxy` | | | Disable proxy mode (CONNECT handling with MITM) |
 | `--read-only` | | | Make the registry read-only (reject all publish requests) |
-| `--ca-cert-out` | | | Export CA certificate for HTTPS interception |
+| `--ca-cert-out` | | (temp file) | Export CA certificate for HTTPS interception |
 | `--permissive-publishing` | | | Skip crates.io metadata validation |
-| `--tls` | | | Enable HTTPS (use with `CARGO_HTTP_PROXY=https://...`) |
+| `--no-tls` | | | Disable HTTPS (use plain HTTP) |
 | `--tls-cert` | | | TLS certificate file (PEM) |
 | `--tls-key` | | | TLS private key file (PEM) |
 
@@ -146,11 +148,11 @@ cargo-overlay-registry --read-only -r local=./my-registry -r crates.io
 
 ```bash
 # Start the overlay
-cargo-overlay-registry --ca-cert-out ./ca-cert.pem
+cargo-overlay-registry
 
-# In another terminal, configure cargo
-export CARGO_HTTP_PROXY="http://127.0.0.1:8080"
-export CARGO_HTTP_CAINFO="./ca-cert.pem"
+# In another terminal, configure cargo (paths shown in server output)
+export CARGO_HTTP_PROXY="https://127.0.0.1:8080"
+export CARGO_HTTP_CAINFO="/tmp/cargo-overlay-registry-ca.pem"
 export CARGO_REGISTRY_TOKEN=dummy
 
 # Publish my-core (stored locally, not on crates.io)

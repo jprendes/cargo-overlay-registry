@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto::Builder;
-use log::{debug, error, info};
+use log::{debug, error};
 use rustls::ServerConfig;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
@@ -78,9 +78,9 @@ async fn handle_connect<R: RegistryState + Clone + 'static>(
     });
 
     if should_intercept {
-        info!("HTTP proxy CONNECT MITM interception for {}:{}", host, port);
+        debug!("HTTP proxy CONNECT MITM interception for {}:{}", host, port);
     } else {
-        info!("HTTP proxy CONNECT tunnel to {}:{}", host, port);
+        debug!("HTTP proxy CONNECT tunnel to {}:{}", host, port);
     }
 
     // Spawn task to handle the upgraded connection
@@ -152,7 +152,7 @@ where
         }
     };
 
-    info!("  TLS handshake completed for {}", host);
+    debug!("  TLS handshake completed for {}", host);
 
     // Split the TLS stream for reading and writing
     let (read_half, mut write_half) = tokio::io::split(tls_stream);
@@ -232,7 +232,7 @@ where
             Vec::new()
         };
 
-        info!("  MITM {} https://{}{}", method, host, path);
+        debug!("  MITM {} https://{}{}", method, host, path);
 
         // Convert headers to the format expected by handle_internal_request
         let header_pairs: Vec<(String, String)> = headers
@@ -244,7 +244,7 @@ where
             .collect();
 
         // Handle internally
-        info!("    -> Handling internally");
+        debug!("    -> Handling internally");
         let response =
             handle_internal_request(state.as_ref(), method, path, &header_pairs, &body).await;
 
@@ -265,7 +265,7 @@ where
         tokio::io::AsyncWriteExt::write_all(&mut write_half, &response.body).await?;
         tokio::io::AsyncWriteExt::flush(&mut write_half).await?;
 
-        info!("    <- {} ({} bytes)", response.status, response.body.len());
+        debug!("    <- {} ({} bytes)", response.status, response.body.len());
 
         // Check for Connection: close
         let should_close = headers.iter().any(|h| {
@@ -326,7 +326,7 @@ async fn handle_forward_request<R: RegistryState + Clone + 'static>(
     let method = request.method().clone();
     let url = request.uri().to_string();
 
-    info!("HTTP proxy {} request to {}", method, url);
+    debug!("HTTP proxy {} request to {}", method, url);
 
     // Check if this is an upstream registry URL that should be intercepted
     let should_intercept = url::Url::parse(&url).ok().is_some_and(|parsed| {
@@ -369,7 +369,7 @@ async fn handle_forward_request<R: RegistryState + Clone + 'static>(
             .unwrap_or_default();
         let full_path = format!("{}{}", path, query);
 
-        info!("  -> Handling internally: {}", full_path);
+        debug!("  -> Handling internally: {}", full_path);
 
         // Convert headers
         let header_pairs: Vec<(String, String)> = parts

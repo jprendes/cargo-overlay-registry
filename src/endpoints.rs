@@ -6,7 +6,7 @@ use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use log::{error, info, warn};
+use log::{debug, error, warn};
 
 use crate::registry::{Registry, RegistryError};
 use crate::state::RegistryState;
@@ -127,7 +127,7 @@ pub fn serialize_index_entries(entries: &[IndexEntry]) -> String {
 
 /// Returns a modified config.json pointing to our proxy
 pub async fn handle_config<S: RegistryState>(State(state): State<Arc<S>>) -> impl IntoResponse {
-    info!("GET /config.json - Serving proxy configuration");
+    debug!("GET /config.json - Serving proxy configuration");
 
     let config = RegistryConfig {
         dl: format!("{}/api/v1/crates", state.proxy_base_url()),
@@ -135,7 +135,7 @@ pub async fn handle_config<S: RegistryState>(State(state): State<Arc<S>>) -> imp
         auth_required: None,
     };
 
-    info!("  Response: 200 OK - dl={}, api={}", config.dl, config.api);
+    debug!("  Response: 200 OK - dl={}, api={}", config.dl, config.api);
 
     (
         StatusCode::OK,
@@ -178,20 +178,20 @@ pub async fn handle_index_4plus<S: RegistryState>(
 
 /// Common handler for index lookups using the Registry trait
 async fn handle_index_lookup<S: RegistryState>(state: &S, crate_name: &str) -> Response {
-    info!("GET index/{} - Looking up crate", crate_name);
+    debug!("GET index/{} - Looking up crate", crate_name);
 
     match state.registry().lookup(crate_name).await {
         Ok(entries) => {
             if entries.is_empty() {
-                info!("  Response: 404 Not Found");
+                debug!("  Response: 404 Not Found");
                 return (StatusCode::NOT_FOUND, "Not found").into_response();
             }
 
             let body = serialize_index_entries(&entries);
 
-            info!("  Response: 200 OK ({} entries)", entries.len());
+            debug!("  Response: 200 OK ({} entries)", entries.len());
             if body.len() < 1000 {
-                info!("  Body: {}", body.trim());
+                debug!("  Body: {}", body.trim());
             }
 
             Response::builder()
@@ -221,7 +221,7 @@ pub async fn handle_api_search<S: RegistryState>(
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
     let url = format!("{}/api/v1/crates{}", state.upstream_api(), query);
 
-    info!("GET /api/v1/crates{} -> {}", query, url);
+    debug!("GET /api/v1/crates{} -> {}", query, url);
     proxy_api_request(state.as_ref(), Method::GET, &url, &headers).await
 }
 
@@ -232,7 +232,7 @@ pub async fn handle_api_publish<S: RegistryState>(
     _headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         "PUT /api/v1/crates/new ({} bytes) - Publishing locally",
         body.len()
     );
@@ -246,13 +246,13 @@ pub async fn handle_api_publish<S: RegistryState>(
         }
     };
 
-    info!("  Publishing: {} v{}", metadata.name, metadata.vers);
+    debug!("  Publishing: {} v{}", metadata.name, metadata.vers);
 
     // Use the Registry trait to publish
     match state.registry().publish(metadata, crate_data).await {
         Ok(checksum) => {
-            info!("  Checksum: {}", checksum);
-            info!("  Response: 200 OK");
+            debug!("  Checksum: {}", checksum);
+            debug!("  Response: 200 OK");
 
             let response = PublishResponse {
                 warnings: PublishWarnings {
@@ -295,11 +295,11 @@ pub async fn handle_api_download<S: RegistryState>(
     State(state): State<Arc<S>>,
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    info!("GET /api/v1/crates/{}/{}/download", crate_name, version);
+    debug!("GET /api/v1/crates/{}/{}/download", crate_name, version);
 
     match state.registry().download(&crate_name, &version).await {
         Ok(data) => {
-            info!("  Response: 200 OK ({} bytes)", data.len());
+            debug!("  Response: 200 OK ({} bytes)", data.len());
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/gzip")],
@@ -308,7 +308,7 @@ pub async fn handle_api_download<S: RegistryState>(
                 .into_response()
         }
         Err(RegistryError::NotFound) => {
-            info!("  Response: 404 Not Found");
+            debug!("  Response: 404 Not Found");
             (StatusCode::NOT_FOUND, "Crate not found").into_response()
         }
         Err(e) => {
@@ -345,7 +345,7 @@ async fn proxy_api_request<S: RegistryState>(
         && let Ok(value) = auth.to_str()
     {
         request = request.header(header::AUTHORIZATION, value);
-        info!("  Forwarding Authorization header");
+        debug!("  Forwarding Authorization header");
     }
 
     // Forward accept header
@@ -358,7 +358,7 @@ async fn proxy_api_request<S: RegistryState>(
     match request.send().await {
         Ok(response) => {
             let status = response.status();
-            info!(
+            debug!(
                 "  Response: {} {}",
                 status.as_u16(),
                 status.canonical_reason().unwrap_or("")
@@ -381,10 +381,10 @@ async fn proxy_api_request<S: RegistryState>(
                         if let Ok(text) = std::str::from_utf8(&body)
                             && (text.starts_with('{') || text.starts_with('['))
                         {
-                            info!("  Response body: {}", text);
+                            debug!("  Response body: {}", text);
                         }
                     } else {
-                        info!("  Response body: {} bytes (binary/large)", body.len());
+                        debug!("  Response body: {} bytes (binary/large)", body.len());
                     }
                     builder.body(Body::from(body)).unwrap()
                 }
@@ -482,7 +482,7 @@ pub async fn handle_internal_request<S: RegistryState>(
 }
 
 fn internal_handle_config<S: RegistryState>(state: &S) -> InternalResponse {
-    info!("GET /config.json - Serving proxy configuration (internal)");
+    debug!("GET /config.json - Serving proxy configuration (internal)");
 
     let config = RegistryConfig {
         dl: format!("{}/api/v1/crates", state.proxy_base_url()),
@@ -490,7 +490,7 @@ fn internal_handle_config<S: RegistryState>(state: &S) -> InternalResponse {
         auth_required: None,
     };
 
-    info!("  Response: 200 OK - dl={}, api={}", config.dl, config.api);
+    debug!("  Response: 200 OK - dl={}, api={}", config.dl, config.api);
     InternalResponse::ok_json(serde_json::to_string_pretty(&config).unwrap())
 }
 
@@ -498,20 +498,20 @@ async fn internal_handle_index_lookup<S: RegistryState>(
     state: &S,
     crate_name: &str,
 ) -> InternalResponse {
-    info!("GET index/{} - Looking up crate (internal)", crate_name);
+    debug!("GET index/{} - Looking up crate (internal)", crate_name);
 
     match state.registry().lookup(crate_name).await {
         Ok(entries) => {
             if entries.is_empty() {
-                info!("  Response: 404 Not Found");
+                debug!("  Response: 404 Not Found");
                 return InternalResponse::error(404, "Not found");
             }
 
             let body = serialize_index_entries(&entries);
 
-            info!("  Response: 200 OK ({} entries)", entries.len());
+            debug!("  Response: 200 OK ({} entries)", entries.len());
             if body.len() < 1000 {
-                info!("  Body: {}", body.trim());
+                debug!("  Body: {}", body.trim());
             }
 
             InternalResponse::ok_json(body)
@@ -524,7 +524,7 @@ async fn internal_handle_index_lookup<S: RegistryState>(
 }
 
 async fn internal_handle_publish<S: RegistryState>(state: &S, body: &[u8]) -> InternalResponse {
-    info!(
+    debug!(
         "PUT /api/v1/crates/new ({} bytes) - Publishing locally (internal)",
         body.len()
     );
@@ -538,13 +538,13 @@ async fn internal_handle_publish<S: RegistryState>(state: &S, body: &[u8]) -> In
         }
     };
 
-    info!("  Publishing: {} v{}", metadata.name, metadata.vers);
+    debug!("  Publishing: {} v{}", metadata.name, metadata.vers);
 
     // Use the Registry trait to publish
     match state.registry().publish(metadata, crate_data).await {
         Ok(checksum) => {
-            info!("  Checksum: {}", checksum);
-            info!("  Response: 200 OK");
+            debug!("  Checksum: {}", checksum);
+            debug!("  Response: 200 OK");
 
             let response = PublishResponse {
                 warnings: PublishWarnings {
@@ -573,18 +573,18 @@ async fn internal_handle_download<S: RegistryState>(
     crate_name: &str,
     version: &str,
 ) -> InternalResponse {
-    info!(
+    debug!(
         "GET /api/v1/crates/{}/{}/download (internal)",
         crate_name, version
     );
 
     match state.registry().download(crate_name, version).await {
         Ok(data) => {
-            info!("  Response: 200 OK ({} bytes)", data.len());
+            debug!("  Response: 200 OK ({} bytes)", data.len());
             InternalResponse::ok_gzip(data)
         }
         Err(RegistryError::NotFound) => {
-            info!("  Response: 404 Not Found");
+            debug!("  Response: 404 Not Found");
             InternalResponse::error(404, "Crate not found")
         }
         Err(e) => {
@@ -600,7 +600,7 @@ async fn internal_handle_search<S: RegistryState>(
     headers: &[(String, String)],
 ) -> InternalResponse {
     let url = format!("{}/api/v1/crates{}", state.upstream_api(), query);
-    info!("GET /api/v1/crates{} -> {} (internal)", query, url);
+    debug!("GET /api/v1/crates{} -> {} (internal)", query, url);
 
     let mut request = state.client().get(&url);
 
@@ -608,7 +608,7 @@ async fn internal_handle_search<S: RegistryState>(
     for (name, value) in headers {
         if name.to_lowercase() == "authorization" {
             request = request.header("Authorization", value);
-            info!("  Forwarding Authorization header");
+            debug!("  Forwarding Authorization header");
         } else if name.to_lowercase() == "accept" {
             request = request.header("Accept", value);
         }
@@ -617,7 +617,7 @@ async fn internal_handle_search<S: RegistryState>(
     match request.send().await {
         Ok(response) => {
             let status = response.status();
-            info!(
+            debug!(
                 "  Response: {} {}",
                 status.as_u16(),
                 status.canonical_reason().unwrap_or("")

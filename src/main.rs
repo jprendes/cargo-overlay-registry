@@ -18,8 +18,8 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Determine if TLS is enabled
-    let use_tls = args.tls || args.tls_cert.is_some();
+    // Determine if TLS is enabled (enabled by default unless --no-tls)
+    let use_tls = !args.no_tls;
 
     // Determine if HTTP proxy mode is enabled (enabled by default unless --no-proxy)
     let enable_http_proxy = !args.no_proxy;
@@ -84,22 +84,30 @@ async fn main() {
         // Generate MITM CA certificate
         let mitm_ca = Arc::new(MitmCa::new().expect("Failed to generate MITM CA certificate"));
 
-        // Export CA certificate if requested
-        if let Some(ca_cert_path) = &args.ca_cert_out {
-            std::fs::write(ca_cert_path, mitm_ca.ca_cert_pem())
-                .expect("Failed to write CA certificate");
-            info!("Exported CA certificate to {:?}", ca_cert_path);
-            info!(
-                "Set CARGO_HTTP_CAINFO={:?} to trust the proxy's certificates",
-                ca_cert_path
-            );
-        }
+        // Export CA certificate (to specified path or temp file)
+        let ca_cert_path = args.ca_cert_out.clone().unwrap_or_else(|| {
+            let temp_dir = std::env::temp_dir();
+            temp_dir.join("cargo-overlay-registry-ca.pem")
+        });
+        std::fs::write(&ca_cert_path, mitm_ca.ca_cert_pem())
+            .expect("Failed to write CA certificate");
+        info!("Exported CA certificate to {:?}", ca_cert_path);
 
         let protocol = if use_tls { "https" } else { "http" };
         info!(
             "Set CARGO_HTTP_PROXY={}://{}:{} to route traffic through proxy",
             protocol, args.host, args.port
         );
+        println!("CARGO_HTTP_PROXY={}://{}:{}/", protocol, args.host, args.port);
+        // If user provides their own TLS cert, they should use that for CAINFO
+        let cainfo_path = args.tls_cert.as_ref().unwrap_or(&ca_cert_path);
+        info!(
+            "Set CARGO_HTTP_CAINFO={:?} to trust the proxy's certificates",
+            cainfo_path
+        );
+        println!("CARGO_HTTP_CAINFO={:?}", cainfo_path);
+        info!("Set CARGO_REGISTRY_TOKEN=dummy to enable publishing");
+        println!("CARGO_REGISTRY_TOKEN=dummy");
 
         Some(HttpProxyState {
             proxy_state: state.clone(),

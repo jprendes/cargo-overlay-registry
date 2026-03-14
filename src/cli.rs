@@ -44,7 +44,7 @@ pub struct Args {
     pub ca_cert_out: Option<PathBuf>,
 
     /// Path to TLS certificate file (PEM format)
-    /// If not provided but --tls is set, a self-signed certificate will be generated
+    /// If not provided, a self-signed certificate will be generated
     #[arg(long)]
     pub tls_cert: Option<PathBuf>,
 
@@ -53,9 +53,9 @@ pub struct Args {
     #[arg(long)]
     pub tls_key: Option<PathBuf>,
 
-    /// Enable HTTPS with self-signed certificate (if --tls-cert not provided)
+    /// Disable HTTPS (use plain HTTP instead)
     #[arg(long)]
-    pub tls: bool,
+    pub no_tls: bool,
 
     /// Skip crates.io-style metadata validation on publish
     /// (by default, description, license/license-file, valid keywords, etc. are required)
