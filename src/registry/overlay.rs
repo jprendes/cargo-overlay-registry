@@ -6,6 +6,7 @@ use crate::types::{IndexEntry, PublishMetadata};
 /// - Writes (publish) go to the top layer
 /// - Reads check the top layer first, then fall back to the bottom layer
 /// - Index lookups merge entries from both layers (top takes precedence for same version)
+#[derive(Clone)]
 pub struct OverlayRegistry<Top, Bottom>
 where
     Top: Registry,

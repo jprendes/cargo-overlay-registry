@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cargo_overlay_registry::{
-    build_registry_router, handle_proxy_connection, HttpProxyState, MitmCa, ProxyState,
+    build_registry_router, handle_proxy_connection, GenericProxyState, HttpProxyState, MitmCa,
 };
 use tokio::fs;
 use tokio::sync::oneshot;
@@ -61,10 +61,15 @@ async fn main() -> ExitCode {
 
     let ca_cert_path = temp_path.join("ca-cert.pem");
 
-    // Create proxy state
-    let state = Arc::new(ProxyState::new(
+    // Use a target directory inside the temp folder so tmp-registry is in a known location
+    let target_dir = temp_path.join("target");
+    let tmp_registry = target_dir.join("package").join("tmp-registry");
+
+    // Create proxy state with tmp-registry (PublishRegistry) layered on top
+    let state = Arc::new(GenericProxyState::for_publish(
         base_url.clone(),
         registry_path.clone(),
+        tmp_registry.clone(),
         "https://index.crates.io".to_string(),
         "https://crates.io".to_string(),
         false, // enforce crates.io-style metadata validation
@@ -149,7 +154,8 @@ async fn main() -> ExitCode {
     let http_proxy_url = format!("http://127.0.0.1:{}", port);
     cmd.env("CARGO_HTTP_PROXY", &http_proxy_url)
         .env("CARGO_HTTP_CAINFO", &ca_cert_path)
-        .env("CARGO_REGISTRY_TOKEN", "dummy-token");
+        .env("CARGO_REGISTRY_TOKEN", "dummy-token")
+        .env("CARGO_TARGET_DIR", &target_dir);
 
     // Run cargo publish
     let status = cmd.status().expect("Failed to run cargo publish");

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
@@ -7,6 +6,7 @@ use super::{Registry, RegistryError};
 use crate::types::{IndexDependency, IndexEntry, PublishMetadata};
 
 /// A local filesystem-based registry
+#[derive(Clone)]
 pub struct LocalRegistry {
     /// Path to the registry storage directory
     pub path: PathBuf,
@@ -129,12 +129,16 @@ impl Registry for LocalRegistry {
                         kind: d.kind,
                         registry: d.registry,
                         package,
+                        public: None,
+                        artifact: None,
+                        bindep_target: None,
+                        lib: None,
                     }
                 })
                 .collect(),
             cksum: checksum.clone(),
             features: metadata.features,
-            features2: HashMap::new(),
+            features2: None,
             yanked: false,
             links: metadata.links,
             rust_version: metadata.rust_version,

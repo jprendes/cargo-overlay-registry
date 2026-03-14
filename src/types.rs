@@ -171,16 +171,32 @@ pub struct IndexEntry {
     pub deps: Vec<IndexDependency>,
     pub cksum: String,
     pub features: HashMap<String, Vec<String>>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub features2: HashMap<String, Vec<String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_features2")]
+    pub features2: Option<HashMap<String, Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_yanked")]
     pub yanked: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rust_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub v: Option<u32>,
+}
+
+/// Deserialize features2 which can be null, missing, or a map
+fn deserialize_features2<'de, D>(deserializer: D) -> Result<Option<HashMap<String, Vec<String>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<HashMap<String, Vec<String>>>::deserialize(deserializer)
+}
+
+/// Deserialize yanked which can be null, missing, or a boolean (null/missing -> false)
+fn deserialize_yanked<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<bool>::deserialize(deserializer).map(|opt| opt.unwrap_or(false))
 }
 
 /// Dependency in index entry
@@ -196,6 +212,15 @@ pub struct IndexDependency {
     pub registry: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package: Option<String>,
+    // Additional fields cargo may include (we ignore them for serialization)
+    #[serde(default, skip_serializing)]
+    pub public: Option<bool>,
+    #[serde(default, skip_serializing)]
+    pub artifact: Option<serde_json::Value>,
+    #[serde(default, skip_serializing)]
+    pub bindep_target: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub lib: Option<bool>,
 }
 
 /// Publish response

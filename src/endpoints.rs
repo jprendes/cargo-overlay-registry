@@ -9,7 +9,7 @@ use bytes::Bytes;
 use log::{error, info, warn};
 
 use crate::registry::{Registry, RegistryError};
-use crate::state::ProxyState;
+use crate::state::RegistryState;
 use crate::types::{IndexEntry, PublishMetadata, PublishResponse, PublishWarnings, RegistryConfig};
 
 /// Internal response type for HTTP proxy
@@ -126,12 +126,12 @@ pub fn serialize_index_entries(entries: &[IndexEntry]) -> String {
 }
 
 /// Returns a modified config.json pointing to our proxy
-pub async fn handle_config(State(state): State<Arc<ProxyState>>) -> impl IntoResponse {
+pub async fn handle_config<S: RegistryState>(State(state): State<Arc<S>>) -> impl IntoResponse {
     info!("GET /config.json - Serving proxy configuration");
 
     let config = RegistryConfig {
-        dl: format!("{}/api/v1/crates", state.proxy_base_url),
-        api: state.proxy_base_url.clone(),
+        dl: format!("{}/api/v1/crates", state.proxy_base_url()),
+        api: state.proxy_base_url().to_string(),
         auth_required: None,
     };
 
@@ -145,42 +145,42 @@ pub async fn handle_config(State(state): State<Arc<ProxyState>>) -> impl IntoRes
 }
 
 /// Handle index request for 1-character package names
-pub async fn handle_index_1char(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_index_1char<S: RegistryState>(
+    State(state): State<Arc<S>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    handle_index_lookup(&state, &name).await
+    handle_index_lookup(state.as_ref(), &name).await
 }
 
 /// Handle index request for 2-character package names
-pub async fn handle_index_2char(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_index_2char<S: RegistryState>(
+    State(state): State<Arc<S>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    handle_index_lookup(&state, &name).await
+    handle_index_lookup(state.as_ref(), &name).await
 }
 
 /// Handle index request for 3-character package names
-pub async fn handle_index_3char(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_index_3char<S: RegistryState>(
+    State(state): State<Arc<S>>,
     Path((_first_char, name)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    handle_index_lookup(&state, &name).await
+    handle_index_lookup(state.as_ref(), &name).await
 }
 
 /// Handle index request for 4+ character package names
-pub async fn handle_index_4plus(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_index_4plus<S: RegistryState>(
+    State(state): State<Arc<S>>,
     Path((_first_two, _second_two, name)): Path<(String, String, String)>,
 ) -> impl IntoResponse {
-    handle_index_lookup(&state, &name).await
+    handle_index_lookup(state.as_ref(), &name).await
 }
 
 /// Common handler for index lookups using the Registry trait
-async fn handle_index_lookup(state: &ProxyState, crate_name: &str) -> Response {
+async fn handle_index_lookup<S: RegistryState>(state: &S, crate_name: &str) -> Response {
     info!("GET index/{} - Looking up crate", crate_name);
 
-    match state.registry.lookup(crate_name).await {
+    match state.registry().lookup(crate_name).await {
         Ok(entries) => {
             if entries.is_empty() {
                 info!("  Response: 404 Not Found");
@@ -213,8 +213,8 @@ async fn handle_index_lookup(state: &ProxyState, crate_name: &str) -> Response {
 
 /// Handle API search request: GET /api/v1/crates
 /// This proxies to the upstream API since search is not part of the Registry trait
-pub async fn handle_api_search(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_api_search<S: RegistryState>(
+    State(state): State<Arc<S>>,
     uri: Uri,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -222,13 +222,13 @@ pub async fn handle_api_search(
     let url = format!("{}/api/v1/crates{}", state.upstream_api(), query);
 
     info!("GET /api/v1/crates{} -> {}", query, url);
-    proxy_api_request(&state, Method::GET, &url, &headers).await
+    proxy_api_request(state.as_ref(), Method::GET, &url, &headers).await
 }
 
 /// Handle API publish request: PUT /api/v1/crates/new
 /// This saves the crate locally using the Registry trait
-pub async fn handle_api_publish(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_api_publish<S: RegistryState>(
+    State(state): State<Arc<S>>,
     _headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -249,7 +249,7 @@ pub async fn handle_api_publish(
     info!("  Publishing: {} v{}", metadata.name, metadata.vers);
 
     // Use the Registry trait to publish
-    match state.registry.publish(metadata, crate_data).await {
+    match state.registry().publish(metadata, crate_data).await {
         Ok(checksum) => {
             info!("  Checksum: {}", checksum);
             info!("  Response: 200 OK");
@@ -291,13 +291,13 @@ pub async fn handle_api_publish(
 
 /// Handle API download request: GET /api/v1/crates/{crate}/{version}/download
 /// Uses the Registry trait to check local first, then falls back to upstream
-pub async fn handle_api_download(
-    State(state): State<Arc<ProxyState>>,
+pub async fn handle_api_download<S: RegistryState>(
+    State(state): State<Arc<S>>,
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
     info!("GET /api/v1/crates/{}/{}/download", crate_name, version);
 
-    match state.registry.download(&crate_name, &version).await {
+    match state.registry().download(&crate_name, &version).await {
         Ok(data) => {
             info!("  Response: 200 OK ({} bytes)", data.len());
             (
@@ -323,17 +323,17 @@ pub async fn handle_api_download(
 }
 
 /// Generic API proxy function for search and other API calls
-async fn proxy_api_request(
-    state: &ProxyState,
+async fn proxy_api_request<S: RegistryState>(
+    state: &S,
     method: Method,
     url: &str,
     headers: &HeaderMap,
 ) -> Response {
     let mut request = match method {
-        Method::GET => state.client.get(url),
-        Method::PUT => state.client.put(url),
-        Method::DELETE => state.client.delete(url),
-        Method::POST => state.client.post(url),
+        Method::GET => state.client().get(url),
+        Method::PUT => state.client().put(url),
+        Method::DELETE => state.client().delete(url),
+        Method::POST => state.client().post(url),
         _ => {
             warn!("  Unsupported method: {}", method);
             return (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response();
@@ -411,8 +411,8 @@ async fn proxy_api_request(
 
 /// Handle an internal request from the HTTP proxy without going through axum.
 /// Routes based on method and path, returning an InternalResponse.
-pub async fn handle_internal_request(
-    state: &ProxyState,
+pub async fn handle_internal_request<S: RegistryState>(
+    state: &S,
     method: &str,
     path: &str,
     headers: &[(String, String)],
@@ -481,12 +481,12 @@ pub async fn handle_internal_request(
     }
 }
 
-fn internal_handle_config(state: &ProxyState) -> InternalResponse {
+fn internal_handle_config<S: RegistryState>(state: &S) -> InternalResponse {
     info!("GET /config.json - Serving proxy configuration (internal)");
 
     let config = RegistryConfig {
-        dl: format!("{}/api/v1/crates", state.proxy_base_url),
-        api: state.proxy_base_url.clone(),
+        dl: format!("{}/api/v1/crates", state.proxy_base_url()),
+        api: state.proxy_base_url().to_string(),
         auth_required: None,
     };
 
@@ -494,10 +494,10 @@ fn internal_handle_config(state: &ProxyState) -> InternalResponse {
     InternalResponse::ok_json(serde_json::to_string_pretty(&config).unwrap())
 }
 
-async fn internal_handle_index_lookup(state: &ProxyState, crate_name: &str) -> InternalResponse {
+async fn internal_handle_index_lookup<S: RegistryState>(state: &S, crate_name: &str) -> InternalResponse {
     info!("GET index/{} - Looking up crate (internal)", crate_name);
 
-    match state.registry.lookup(crate_name).await {
+    match state.registry().lookup(crate_name).await {
         Ok(entries) => {
             if entries.is_empty() {
                 info!("  Response: 404 Not Found");
@@ -520,7 +520,7 @@ async fn internal_handle_index_lookup(state: &ProxyState, crate_name: &str) -> I
     }
 }
 
-async fn internal_handle_publish(state: &ProxyState, body: &[u8]) -> InternalResponse {
+async fn internal_handle_publish<S: RegistryState>(state: &S, body: &[u8]) -> InternalResponse {
     info!(
         "PUT /api/v1/crates/new ({} bytes) - Publishing locally (internal)",
         body.len()
@@ -538,7 +538,7 @@ async fn internal_handle_publish(state: &ProxyState, body: &[u8]) -> InternalRes
     info!("  Publishing: {} v{}", metadata.name, metadata.vers);
 
     // Use the Registry trait to publish
-    match state.registry.publish(metadata, crate_data).await {
+    match state.registry().publish(metadata, crate_data).await {
         Ok(checksum) => {
             info!("  Checksum: {}", checksum);
             info!("  Response: 200 OK");
@@ -565,8 +565,8 @@ async fn internal_handle_publish(state: &ProxyState, body: &[u8]) -> InternalRes
     }
 }
 
-async fn internal_handle_download(
-    state: &ProxyState,
+async fn internal_handle_download<S: RegistryState>(
+    state: &S,
     crate_name: &str,
     version: &str,
 ) -> InternalResponse {
@@ -575,7 +575,7 @@ async fn internal_handle_download(
         crate_name, version
     );
 
-    match state.registry.download(crate_name, version).await {
+    match state.registry().download(crate_name, version).await {
         Ok(data) => {
             info!("  Response: 200 OK ({} bytes)", data.len());
             InternalResponse::ok_gzip(data)
@@ -591,15 +591,15 @@ async fn internal_handle_download(
     }
 }
 
-async fn internal_handle_search(
-    state: &ProxyState,
+async fn internal_handle_search<S: RegistryState>(
+    state: &S,
     query: &str,
     headers: &[(String, String)],
 ) -> InternalResponse {
     let url = format!("{}/api/v1/crates{}", state.upstream_api(), query);
     info!("GET /api/v1/crates{} -> {} (internal)", query, url);
 
-    let mut request = state.client.get(&url);
+    let mut request = state.client().get(&url);
 
     // Forward authorization header
     for (name, value) in headers {

@@ -14,19 +14,19 @@ use tokio_rustls::TlsAcceptor;
 use tower::Service;
 
 use crate::endpoints::{handle_internal_request, InternalResponse};
-use crate::state::{MitmCa, ProxyState};
+use crate::state::{MitmCa, ProxyState, RegistryState};
 
 /// Shared state for the HTTP proxy functionality
 #[derive(Clone)]
-pub struct HttpProxyState {
-    pub proxy_state: Arc<ProxyState>,
+pub struct HttpProxyState<S: RegistryState + Clone = ProxyState> {
+    pub proxy_state: Arc<S>,
     pub mitm_ca: Arc<MitmCa>,
     pub upstream_hosts: Arc<Vec<String>>,
 }
 
 /// Handle incoming requests - routes CONNECT and proxy-style requests
-pub async fn handle_proxy_request(
-    State(state): State<HttpProxyState>,
+pub async fn handle_proxy_request<R: RegistryState + Clone + 'static>(
+    State(state): State<HttpProxyState<R>>,
     request: Request,
 ) -> Response {
     let method = request.method().clone();
@@ -53,7 +53,7 @@ pub fn is_proxy_request(request: &Request) -> bool {
 }
 
 /// Handle CONNECT method for HTTPS tunneling
-async fn handle_connect(state: HttpProxyState, request: Request) -> Response {
+async fn handle_connect<R: RegistryState + Clone + 'static>(state: HttpProxyState<R>, request: Request) -> Response {
     let target = request.uri().to_string();
 
     // Parse target as host:port
@@ -112,14 +112,15 @@ async fn handle_connect(state: HttpProxyState, request: Request) -> Response {
 }
 
 /// Handle CONNECT with MITM TLS interception for upstream registry domains
-async fn handle_connect_mitm<S>(
+async fn handle_connect_mitm<S, R>(
     stream: S,
     host: &str,
-    state: Arc<ProxyState>,
+    state: Arc<R>,
     mitm_ca: Arc<MitmCa>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+    R: RegistryState + 'static,
 {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -241,7 +242,7 @@ where
 
         // Handle internally
         info!("    -> Handling internally");
-        let response = handle_internal_request(&state, method, path, &header_pairs, &body).await;
+        let response = handle_internal_request(state.as_ref(), method, path, &header_pairs, &body).await;
 
         // Write response
         let status_line = format!("HTTP/1.1 {} OK\r\n", response.status);
@@ -314,7 +315,7 @@ where
 }
 
 /// Handle regular HTTP proxy request (forward proxy with absolute URL)
-async fn handle_forward_request(state: HttpProxyState, request: Request) -> Response {
+async fn handle_forward_request<R: RegistryState + Clone + 'static>(state: HttpProxyState<R>, request: Request) -> Response {
     let method = request.method().clone();
     let url = request.uri().to_string();
 
@@ -371,7 +372,7 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
             .collect();
 
         let internal_response = handle_internal_request(
-            &state.proxy_state,
+            state.proxy_state.as_ref(),
             method.as_str(),
             &full_path,
             &header_pairs,
@@ -382,7 +383,7 @@ async fn handle_forward_request(state: HttpProxyState, request: Request) -> Resp
         convert_internal_response(internal_response)
     } else {
         // Passthrough to upstream
-        let client = &state.proxy_state.client;
+        let client = state.proxy_state.client();
 
         let request_builder = match method {
             Method::GET => client.get(&url),
@@ -468,9 +469,10 @@ fn convert_internal_response(internal: InternalResponse) -> Response {
 }
 
 /// Serve HTTP requests on any stream type with proxy support
-pub async fn serve_stream<S>(stream: S, app: Router, proxy_state: HttpProxyState)
+pub async fn serve_stream<S, R>(stream: S, app: Router, proxy_state: HttpProxyState<R>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    R: RegistryState + Clone + 'static,
 {
     use std::convert::Infallible;
 
@@ -506,12 +508,15 @@ where
 }
 
 /// Handle a proxy connection, optionally with TLS
-pub async fn handle_proxy_connection(
+pub async fn handle_proxy_connection<R>(
     stream: TcpStream,
     app: Router,
-    proxy_state: HttpProxyState,
+    proxy_state: HttpProxyState<R>,
     tls_acceptor: Option<TlsAcceptor>,
-) {
+)
+where
+    R: RegistryState + Clone + 'static,
+{
     if let Some(tls_acceptor) = tls_acceptor {
         let tls_stream = match tls_acceptor.accept(stream).await {
             Ok(s) => s,

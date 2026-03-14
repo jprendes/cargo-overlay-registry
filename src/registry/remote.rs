@@ -4,6 +4,7 @@ use super::{Registry, RegistryError};
 use crate::types::IndexEntry;
 
 /// A remote registry that fetches from an upstream like crates.io
+#[derive(Clone)]
 pub struct RemoteRegistry {
     /// HTTP client for making requests
     client: Client,
