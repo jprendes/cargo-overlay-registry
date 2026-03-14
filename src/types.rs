@@ -171,7 +171,11 @@ pub struct IndexEntry {
     pub deps: Vec<IndexDependency>,
     pub cksum: String,
     pub features: HashMap<String, Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_features2")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_features2"
+    )]
     pub features2: Option<HashMap<String, Vec<String>>>,
     #[serde(default, deserialize_with = "deserialize_yanked")]
     pub yanked: bool,
@@ -184,7 +188,9 @@ pub struct IndexEntry {
 }
 
 /// Deserialize features2 which can be null, missing, or a map
-fn deserialize_features2<'de, D>(deserializer: D) -> Result<Option<HashMap<String, Vec<String>>>, D::Error>
+fn deserialize_features2<'de, D>(
+    deserializer: D,
+) -> Result<Option<HashMap<String, Vec<String>>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

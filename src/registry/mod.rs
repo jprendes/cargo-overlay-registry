@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 pub use local::LocalRegistry;
 pub use overlay::OverlayRegistry;
-
 pub use remote::RemoteRegistry;
 pub use spec::{build_registry, BuiltRegistry, RegistryBuildOptions, RegistrySpec};
 

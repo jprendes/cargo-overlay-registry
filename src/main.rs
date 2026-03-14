@@ -14,7 +14,7 @@ use log::info;
 #[tokio::main]
 async fn main() {
     // Initialize the logger
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let args = Args::parse();
 
@@ -44,14 +44,16 @@ async fn main() {
     // Build registry overlay
     let options = RegistryBuildOptions {
         permissive_publishing: args.permissive_publishing,
+        read_only: args.read_only,
     };
     let built = build_registry(&registries, &options);
 
     // Log registry info
-    for spec in &registries {
+    for (idx, spec) in registries.iter().enumerate() {
         match spec {
-            RegistrySpec::Local { path, read_only } => {
-                let mode = if *read_only { "read-only" } else { "writable" };
+            RegistrySpec::Local { path } => {
+                let is_writable = idx == 0 && !args.read_only;
+                let mode = if is_writable { "writable" } else { "read-only" };
                 if let Some(p) = path {
                     info!("Local registry ({}) at: {}", mode, p.display());
                 } else {

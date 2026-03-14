@@ -53,7 +53,10 @@ pub fn is_proxy_request(request: &Request) -> bool {
 }
 
 /// Handle CONNECT method for HTTPS tunneling
-async fn handle_connect<R: RegistryState + Clone + 'static>(state: HttpProxyState<R>, request: Request) -> Response {
+async fn handle_connect<R: RegistryState + Clone + 'static>(
+    state: HttpProxyState<R>,
+    request: Request,
+) -> Response {
     let target = request.uri().to_string();
 
     // Parse target as host:port
@@ -242,7 +245,8 @@ where
 
         // Handle internally
         info!("    -> Handling internally");
-        let response = handle_internal_request(state.as_ref(), method, path, &header_pairs, &body).await;
+        let response =
+            handle_internal_request(state.as_ref(), method, path, &header_pairs, &body).await;
 
         // Write response
         let status_line = format!("HTTP/1.1 {} OK\r\n", response.status);
@@ -315,7 +319,10 @@ where
 }
 
 /// Handle regular HTTP proxy request (forward proxy with absolute URL)
-async fn handle_forward_request<R: RegistryState + Clone + 'static>(state: HttpProxyState<R>, request: Request) -> Response {
+async fn handle_forward_request<R: RegistryState + Clone + 'static>(
+    state: HttpProxyState<R>,
+    request: Request,
+) -> Response {
     let method = request.method().clone();
     let url = request.uri().to_string();
 
@@ -513,8 +520,7 @@ pub async fn handle_proxy_connection<R>(
     app: Router,
     proxy_state: HttpProxyState<R>,
     tls_acceptor: Option<TlsAcceptor>,
-)
-where
+) where
     R: RegistryState + Clone + 'static,
 {
     if let Some(tls_acceptor) = tls_acceptor {

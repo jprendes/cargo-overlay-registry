@@ -7,8 +7,7 @@ use super::{AnyRegistry, LocalRegistry, OverlayRegistry, RemoteRegistry};
 pub enum RegistrySpec {
     /// Local filesystem registry
     /// Path is optional, defaults to a temporary directory
-    /// read_only controls whether the registry accepts publishes
-    Local { path: Option<PathBuf>, read_only: bool },
+    Local { path: Option<PathBuf> },
     /// Remote registry (read-only)
     Remote { api_url: String, index_url: String },
 }
@@ -26,24 +25,12 @@ impl RegistrySpec {
     pub fn local(path: impl Into<PathBuf>) -> Self {
         RegistrySpec::Local {
             path: Some(path.into()),
-            read_only: false,
         }
     }
 
     /// Create a local registry spec that will use a temporary directory
     pub fn local_temp() -> Self {
-        RegistrySpec::Local {
-            path: None,
-            read_only: false,
-        }
-    }
-
-    /// Create a read-only local registry spec with a specific path
-    pub fn local_read_only(path: impl Into<PathBuf>) -> Self {
-        RegistrySpec::Local {
-            path: Some(path.into()),
-            read_only: true,
-        }
+        RegistrySpec::Local { path: None }
     }
 
     /// Create a remote registry spec
@@ -73,22 +60,8 @@ impl std::str::FromStr for RegistrySpec {
 
         match reg_type {
             "local" => {
-                let (path, read_only) = match value {
-                    Some(v) if v.ends_with(",ro") => {
-                        let path_str = &v[..v.len() - 3];
-                        (
-                            if path_str.is_empty() {
-                                None
-                            } else {
-                                Some(PathBuf::from(path_str))
-                            },
-                            true,
-                        )
-                    }
-                    Some(v) => (Some(PathBuf::from(v)), false),
-                    None => (None, false),
-                };
-                Ok(RegistrySpec::Local { path, read_only })
+                let path = value.map(PathBuf::from);
+                Ok(RegistrySpec::Local { path })
             }
             "remote" => {
                 let value = value.ok_or("remote registry requires a URL")?;
@@ -113,6 +86,8 @@ impl std::str::FromStr for RegistrySpec {
 pub struct RegistryBuildOptions {
     /// Skip metadata validation on the topmost local registry
     pub permissive_publishing: bool,
+    /// Make all registries read-only (no publishing)
+    pub read_only: bool,
 }
 
 /// Result of building a registry from specs
@@ -152,7 +127,7 @@ pub fn build_registry(specs: &[RegistrySpec], options: &RegistryBuildOptions) ->
 
     for (idx, spec) in specs.iter().enumerate().rev() {
         let layer: AnyRegistry = match spec {
-            RegistrySpec::Local { path, read_only } => {
+            RegistrySpec::Local { path } => {
                 let path = path.clone().unwrap_or_else(|| {
                     let temp_dir =
                         tempfile::tempdir().expect("Failed to create temporary directory");
@@ -164,30 +139,28 @@ pub fn build_registry(specs: &[RegistrySpec], options: &RegistryBuildOptions) ->
                 // Create index directory
                 std::fs::create_dir_all(path.join("index")).ok();
 
-                if *read_only {
-                    AnyRegistry::new(LocalRegistry::read_only(path))
-                } else {
-                    // The topmost local registry gets permissive publishing if the flag is set
-                    let is_topmost = topmost_local_idx == Some(idx);
-                    let validate = !(options.permissive_publishing && is_topmost);
+                // Only the topmost local registry can be writable (if not read_only)
+                let is_topmost = topmost_local_idx == Some(idx);
+                if is_topmost && !options.read_only {
+                    let validate = !options.permissive_publishing;
                     AnyRegistry::new(LocalRegistry::new(path, validate))
+                } else {
+                    AnyRegistry::new(LocalRegistry::read_only(path))
                 }
             }
             RegistrySpec::Remote { api_url, index_url } => {
                 // Extract hosts for MITM interception
-                if let Ok(url) = url::Url::parse(api_url) {
-                    if let Some(host) = url.host_str() {
-                        if !upstream_hosts.contains(&host.to_string()) {
-                            upstream_hosts.push(host.to_string());
-                        }
-                    }
+                if let Ok(url) = url::Url::parse(api_url)
+                    && let Some(host) = url.host_str()
+                    && !upstream_hosts.contains(&host.to_string())
+                {
+                    upstream_hosts.push(host.to_string());
                 }
-                if let Ok(url) = url::Url::parse(index_url) {
-                    if let Some(host) = url.host_str() {
-                        if !upstream_hosts.contains(&host.to_string()) {
-                            upstream_hosts.push(host.to_string());
-                        }
-                    }
+                if let Ok(url) = url::Url::parse(index_url)
+                    && let Some(host) = url.host_str()
+                    && !upstream_hosts.contains(&host.to_string())
+                {
+                    upstream_hosts.push(host.to_string());
                 }
                 AnyRegistry::new(RemoteRegistry::new(index_url.clone(), api_url.clone()))
             }
@@ -200,10 +173,10 @@ pub fn build_registry(specs: &[RegistrySpec], options: &RegistryBuildOptions) ->
     }
 
     // Add static.crates.io if crates.io is in hosts
-    if upstream_hosts.iter().any(|h| h.contains("crates.io")) {
-        if !upstream_hosts.contains(&"static.crates.io".to_string()) {
-            upstream_hosts.push("static.crates.io".to_string());
-        }
+    if upstream_hosts.iter().any(|h| h.contains("crates.io"))
+        && !upstream_hosts.contains(&"static.crates.io".to_string())
+    {
+        upstream_hosts.push("static.crates.io".to_string());
     }
 
     BuiltRegistry {

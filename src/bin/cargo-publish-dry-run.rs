@@ -57,11 +57,12 @@ async fn main() -> ExitCode {
     // Build registry: local > tmp-registry > crates.io
     let specs = vec![
         RegistrySpec::local(&registry_path),
-        RegistrySpec::local_read_only(target_dir.join("package").join("tmp-registry")),
+        RegistrySpec::local(target_dir.join("package").join("tmp-registry")),
         RegistrySpec::crates_io(),
     ];
     let options = RegistryBuildOptions {
         permissive_publishing: false,
+        read_only: false,
     };
     let built = build_registry(&specs, &options);
     let upstream_api = built.upstream_api(&specs);

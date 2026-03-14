@@ -109,9 +109,7 @@ repository = "https://github.com/example/test"
     );
 
     // Verify the crate was actually published
-    let crate_file = proxy
-        .registry_path
-        .join("test-strict-complete-0.1.0.crate");
+    let crate_file = proxy.registry_path.join("test-strict-complete-0.1.0.crate");
     assert!(
         crate_file.exists(),
         "Published crate file should exist at {:?}",
@@ -226,9 +224,7 @@ edition = "2021"
     );
 
     // Verify the crate was actually published
-    let crate_file = proxy
-        .registry_path
-        .join("test-permissive-0.1.0.crate");
+    let crate_file = proxy.registry_path.join("test-permissive-0.1.0.crate");
     assert!(
         crate_file.exists(),
         "Published crate file should exist at {:?}",

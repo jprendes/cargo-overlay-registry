@@ -494,7 +494,10 @@ fn internal_handle_config<S: RegistryState>(state: &S) -> InternalResponse {
     InternalResponse::ok_json(serde_json::to_string_pretty(&config).unwrap())
 }
 
-async fn internal_handle_index_lookup<S: RegistryState>(state: &S, crate_name: &str) -> InternalResponse {
+async fn internal_handle_index_lookup<S: RegistryState>(
+    state: &S,
+    crate_name: &str,
+) -> InternalResponse {
     info!("GET index/{} - Looking up crate (internal)", crate_name);
 
     match state.registry().lookup(crate_name).await {

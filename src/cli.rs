@@ -23,7 +23,6 @@ pub struct Args {
     /// Registry layers (top to bottom). Examples:
     ///   -r local              Local registry in temp dir
     ///   -r local=/path        Local registry at path
-    ///   -r local=/path,ro     Read-only local registry at path
     ///   -r crates.io          Shortcut for crates.io remote
     ///   -r remote=https://my-registry.com
     ///   -r remote=https://api.com,https://index.com
@@ -34,6 +33,10 @@ pub struct Args {
     /// By default, the server acts as a forward proxy for cargo (HTTP or HTTPS)
     #[arg(long)]
     pub no_proxy: bool,
+
+    /// Make the registry read-only (reject all publish requests)
+    #[arg(long)]
+    pub read_only: bool,
 
     /// Path to export CA certificate (PEM format) for MITM interception
     /// Use with CARGO_HTTP_CAINFO to make cargo trust the proxy's certificates
