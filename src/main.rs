@@ -4,13 +4,12 @@ use std::sync::Arc;
 
 use axum_server::tls_rustls::RustlsConfig;
 use cargo_overlay_registry::{
-    build_registry_router, generate_self_signed_cert, handle_proxy_connection, HttpProxyState,
-    MitmCa, ProxyState,
+    build_registry, build_registry_router, generate_self_signed_cert, handle_proxy_connection,
+    GenericProxyState, HttpProxyState, MitmCa, RegistryBuildOptions, RegistrySpec,
 };
 use clap::Parser;
 use cli::Args;
 use log::info;
-use tokio::fs;
 
 #[tokio::main]
 async fn main() {
@@ -27,24 +26,14 @@ async fn main() {
 
     let proxy_base_url = args.base_url.clone();
 
-    // Use provided registry path or create a temporary directory
-    let (_temp_dir, local_registry_path): (Option<tempfile::TempDir>, std::path::PathBuf) =
-        if let Some(path) = args.registry_path {
-            (None, path)
-        } else {
-            let temp_dir = tempfile::tempdir().expect("Failed to create temporary directory");
-            let path = temp_dir.path().to_path_buf();
-            (Some(temp_dir), path)
-        };
+    // Get effective registries
+    let registries = args.effective_registries();
 
     info!(
         "Starting cargo registry proxy on {}:{}",
         args.host, args.port
     );
     info!("Proxy base URL: {}", proxy_base_url);
-    info!("Local registry path: {}", local_registry_path.display());
-    info!("Proxying index from: {}", args.upstream_index);
-    info!("Proxying API from: {}", args.upstream_api);
     if use_tls {
         info!("TLS enabled");
     }
@@ -52,35 +41,43 @@ async fn main() {
         info!("HTTP proxy mode enabled");
     }
 
-    // Create local registry directories
-    fs::create_dir_all(local_registry_path.join("crates"))
-        .await
-        .ok();
-    fs::create_dir_all(local_registry_path.join("index"))
-        .await
-        .ok();
+    // Build registry overlay
+    let options = RegistryBuildOptions {
+        permissive_publishing: args.permissive_publishing,
+    };
+    let built = build_registry(&registries, &options);
 
-    // Extract hosts from upstream URLs for HTTP proxy interception
-    let upstream_hosts: Vec<String> = [&args.upstream_index, &args.upstream_api]
-        .iter()
-        .filter_map(|url_str| {
-            url::Url::parse(url_str)
-                .ok()
-                .and_then(|u| u.host_str().map(|h| h.to_string()))
-        })
-        .collect();
+    // Log registry info
+    for spec in &registries {
+        match spec {
+            RegistrySpec::Local { path, read_only } => {
+                let mode = if *read_only { "read-only" } else { "writable" };
+                if let Some(p) = path {
+                    info!("Local registry ({}) at: {}", mode, p.display());
+                } else {
+                    info!("Local registry ({}) in temp dir", mode);
+                }
+            }
+            RegistrySpec::Remote { api_url, index_url } => {
+                info!("Remote registry: api={}, index={}", api_url, index_url);
+            }
+        }
+    }
 
-    let state = Arc::new(ProxyState::new(
+    let upstream_api = built.upstream_api(&registries);
+
+    // Keep temp_dirs alive by moving them into _temp_dirs
+    let _temp_dirs = built.temp_dirs;
+
+    let state = Arc::new(GenericProxyState::new(
         proxy_base_url.clone(),
-        local_registry_path,
-        args.upstream_index,
-        args.upstream_api,
-        args.permissive_publishing,
+        upstream_api,
+        built.registry,
     ));
 
     // Set up HTTP proxy state if enabled
     let http_proxy_state = if enable_http_proxy {
-        info!("Intercepting hosts: {:?}", upstream_hosts);
+        info!("Intercepting hosts: {:?}", built.upstream_hosts);
 
         // Generate MITM CA certificate
         let mitm_ca = Arc::new(MitmCa::new().expect("Failed to generate MITM CA certificate"));
@@ -105,7 +102,7 @@ async fn main() {
         Some(HttpProxyState {
             proxy_state: state.clone(),
             mitm_ca,
-            upstream_hosts: Arc::new(upstream_hosts),
+            upstream_hosts: Arc::new(built.upstream_hosts),
         })
     } else {
         None

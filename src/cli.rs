@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use cargo_overlay_registry::RegistrySpec;
 use clap::Parser;
 
 /// Cargo registry proxy - proxies crates.io and supports local publishing
@@ -19,17 +20,15 @@ pub struct Args {
     #[arg(short, long, default_value = "https://crates.io")]
     pub base_url: String,
 
-    /// Path to store locally published crates (defaults to a temporary directory)
-    #[arg(short, long)]
-    pub registry_path: Option<PathBuf>,
-
-    /// Upstream registry sparse index URL
-    #[arg(long, default_value = "https://index.crates.io")]
-    pub upstream_index: String,
-
-    /// Upstream registry API URL
-    #[arg(long, default_value = "https://crates.io")]
-    pub upstream_api: String,
+    /// Registry layers (top to bottom). Examples:
+    ///   -r local              Local registry in temp dir
+    ///   -r local=/path        Local registry at path
+    ///   -r local=/path,ro     Read-only local registry at path
+    ///   -r crates.io          Shortcut for crates.io remote
+    ///   -r remote=https://my-registry.com
+    ///   -r remote=https://api.com,https://index.com
+    #[arg(short = 'r', long = "registry", value_name = "SPEC")]
+    pub registries: Vec<RegistrySpec>,
 
     /// Disable proxy mode (CONNECT handling with MITM)
     /// By default, the server acts as a forward proxy for cargo (HTTP or HTTPS)
@@ -59,4 +58,15 @@ pub struct Args {
     /// (by default, description, license/license-file, valid keywords, etc. are required)
     #[arg(long)]
     pub permissive_publishing: bool,
+}
+
+impl Args {
+    /// Get the effective registries, applying defaults if none specified
+    pub fn effective_registries(&self) -> Vec<RegistrySpec> {
+        if self.registries.is_empty() {
+            vec![RegistrySpec::local_temp(), RegistrySpec::crates_io()]
+        } else {
+            self.registries.clone()
+        }
+    }
 }

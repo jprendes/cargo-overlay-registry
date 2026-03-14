@@ -1,16 +1,6 @@
-use std::path::PathBuf;
-
 use reqwest::Client;
 
-use crate::registry::{
-    AnyRegistry, LocalRegistry, OverlayRegistry, PublishRegistry, Registry, RemoteRegistry,
-};
-
-/// Type alias for the overlay registry used by the proxy
-pub type ProxyRegistry = OverlayRegistry<LocalRegistry, RemoteRegistry>;
-
-/// Type alias for the publish registry (local > publish > remote)
-pub type PublishProxyRegistry = OverlayRegistry<LocalRegistry, OverlayRegistry<PublishRegistry, RemoteRegistry>>;
+use crate::registry::{AnyRegistry, Registry};
 
 /// Trait for proxy state types that can be used with the registry endpoints
 pub trait RegistryState: Send + Sync {
@@ -62,38 +52,6 @@ impl GenericProxyState {
             registry: AnyRegistry::new(registry),
         }
     }
-
-    /// Create a standard proxy state (local overlay on remote).
-    pub fn standard(
-        proxy_base_url: String,
-        local_registry_path: PathBuf,
-        upstream_index: String,
-        upstream_api: String,
-        permissive_publishing: bool,
-    ) -> Self {
-        let local = LocalRegistry::new(local_registry_path, !permissive_publishing);
-        let remote = RemoteRegistry::new(upstream_index, upstream_api.clone());
-        let registry = OverlayRegistry::new(local, remote);
-        Self::new(proxy_base_url, upstream_api, registry)
-    }
-
-    /// Create a publish-dry-run proxy state (local > publish > remote).
-    pub fn for_publish(
-        proxy_base_url: String,
-        local_registry_path: PathBuf,
-        publish_registry_path: PathBuf,
-        upstream_index: String,
-        upstream_api: String,
-        permissive_publishing: bool,
-    ) -> Self {
-        let remote = RemoteRegistry::new(upstream_index, upstream_api.clone());
-        let publish = PublishRegistry::new(publish_registry_path);
-        let publish_over_remote = OverlayRegistry::new(publish, remote);
-
-        let local = LocalRegistry::new(local_registry_path, !permissive_publishing);
-        let registry = OverlayRegistry::new(local, publish_over_remote);
-        Self::new(proxy_base_url, upstream_api, registry)
-    }
 }
 
 impl RegistryState for GenericProxyState {
@@ -105,128 +63,6 @@ impl RegistryState for GenericProxyState {
 
     fn upstream_api(&self) -> &str {
         &self.upstream_api
-    }
-
-    fn proxy_base_url(&self) -> &str {
-        &self.proxy_base_url
-    }
-
-    fn client(&self) -> &Client {
-        &self.client
-    }
-}
-
-/// Proxy state containing the registry and HTTP client
-#[derive(Clone)]
-pub struct ProxyState {
-    /// HTTP client for API proxying (search, etc.)
-    pub client: Client,
-    /// The base URL where this proxy is listening (for config.json rewriting)
-    pub proxy_base_url: String,
-    /// The overlay registry (local on top of remote)
-    pub registry: ProxyRegistry,
-}
-
-impl ProxyState {
-    pub fn new(
-        proxy_base_url: String,
-        local_registry_path: PathBuf,
-        upstream_index: String,
-        upstream_api: String,
-        permissive_publishing: bool,
-    ) -> Self {
-        let local = LocalRegistry::new(local_registry_path, !permissive_publishing);
-        let remote = RemoteRegistry::new(upstream_index, upstream_api.clone());
-        let registry = OverlayRegistry::new(local, remote);
-
-        Self {
-            client: Client::builder()
-                .user_agent("cargo-overlay-registry/0.1.0")
-                .build()
-                .expect("Failed to create HTTP client"),
-            proxy_base_url,
-            registry,
-        }
-    }
-
-    /// Get the upstream API URL (for search proxying)
-    pub fn upstream_api(&self) -> &str {
-        &self.registry.bottom.api_url
-    }
-}
-
-impl RegistryState for ProxyState {
-    type Registry = ProxyRegistry;
-
-    fn registry(&self) -> &Self::Registry {
-        &self.registry
-    }
-
-    fn upstream_api(&self) -> &str {
-        &self.registry.bottom.api_url
-    }
-
-    fn proxy_base_url(&self) -> &str {
-        &self.proxy_base_url
-    }
-
-    fn client(&self) -> &Client {
-        &self.client
-    }
-}
-
-/// Proxy state for publish-dry-run that includes cargo's tmp-registry
-#[derive(Clone)]
-pub struct PublishProxyState {
-    /// HTTP client for API proxying (search, etc.)
-    pub client: Client,
-    /// The base URL where this proxy is listening (for config.json rewriting)
-    pub proxy_base_url: String,
-    /// The overlay registry (local > publish > remote)
-    pub registry: PublishProxyRegistry,
-}
-
-impl PublishProxyState {
-    pub fn new(
-        proxy_base_url: String,
-        local_registry_path: PathBuf,
-        publish_registry_path: PathBuf,
-        upstream_index: String,
-        upstream_api: String,
-        permissive_publishing: bool,
-    ) -> Self {
-        let remote = RemoteRegistry::new(upstream_index, upstream_api.clone());
-        let publish = PublishRegistry::new(publish_registry_path);
-        let publish_over_remote = OverlayRegistry::new(publish, remote);
-
-        let local = LocalRegistry::new(local_registry_path, !permissive_publishing);
-        let registry = OverlayRegistry::new(local, publish_over_remote);
-
-        Self {
-            client: Client::builder()
-                .user_agent("cargo-overlay-registry/0.1.0")
-                .build()
-                .expect("Failed to create HTTP client"),
-            proxy_base_url,
-            registry,
-        }
-    }
-
-    /// Get the upstream API URL (for search proxying)
-    pub fn upstream_api(&self) -> &str {
-        &self.registry.bottom.bottom.api_url
-    }
-}
-
-impl RegistryState for PublishProxyState {
-    type Registry = PublishProxyRegistry;
-
-    fn registry(&self) -> &Self::Registry {
-        &self.registry
-    }
-
-    fn upstream_api(&self) -> &str {
-        &self.registry.bottom.bottom.api_url
     }
 
     fn proxy_base_url(&self) -> &str {

@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cargo_overlay_registry::{
-    build_registry_router, handle_proxy_connection, GenericProxyState, HttpProxyState, MitmCa,
+    build_registry, build_registry_router, handle_proxy_connection, GenericProxyState,
+    HttpProxyState, MitmCa, RegistryBuildOptions, RegistrySpec,
 };
-use tokio::fs;
 use tokio::sync::oneshot;
 
 /// Find an available port
@@ -44,36 +44,37 @@ async fn main() -> ExitCode {
     let host = "127.0.0.1";
     let base_url = "https://crates.io".to_string();
 
-    // Create temporary directories
+    // Create temporary directory
     let temp_dir = tempfile::tempdir().expect("Failed to create temporary directory");
     let temp_path = temp_dir.path();
 
     let registry_path = temp_path.join("registry");
-    fs::create_dir_all(&registry_path)
-        .await
-        .expect("Failed to create registry directory");
-    fs::create_dir_all(registry_path.join("crates"))
-        .await
-        .expect("Failed to create crates directory");
-    fs::create_dir_all(registry_path.join("index"))
-        .await
-        .expect("Failed to create index directory");
-
     let ca_cert_path = temp_path.join("ca-cert.pem");
 
     // Use a target directory inside the temp folder so tmp-registry is in a known location
     let target_dir = temp_path.join("target");
-    let tmp_registry = target_dir.join("package").join("tmp-registry");
 
-    // Create proxy state with tmp-registry (PublishRegistry) layered on top
-    let state = Arc::new(GenericProxyState::for_publish(
+    // Build registry: local > tmp-registry > crates.io
+    let specs = vec![
+        RegistrySpec::local(&registry_path),
+        RegistrySpec::local_read_only(target_dir.join("package").join("tmp-registry")),
+        RegistrySpec::crates_io(),
+    ];
+    let options = RegistryBuildOptions {
+        permissive_publishing: false,
+    };
+    let built = build_registry(&specs, &options);
+    let upstream_api = built.upstream_api(&specs);
+
+    // Create proxy state
+    let state = Arc::new(GenericProxyState::new(
         base_url.clone(),
-        registry_path.clone(),
-        tmp_registry.clone(),
-        "https://index.crates.io".to_string(),
-        "https://crates.io".to_string(),
-        false, // enforce crates.io-style metadata validation
+        upstream_api,
+        built.registry,
     ));
+
+    // Keep temp_dirs alive (they're empty in this case since we specified paths)
+    let _temp_dirs = built.temp_dirs;
 
     // Generate MITM CA certificate
     let mitm_ca = Arc::new(MitmCa::new().expect("Failed to generate MITM CA certificate"));
@@ -82,16 +83,10 @@ async fn main() -> ExitCode {
     std::fs::write(&ca_cert_path, mitm_ca.ca_cert_pem()).expect("Failed to write CA certificate");
 
     // Set up HTTP proxy state
-    let upstream_hosts = Arc::new(vec![
-        "index.crates.io".to_string(),
-        "crates.io".to_string(),
-        "static.crates.io".to_string(),
-    ]);
-
     let http_proxy_state = HttpProxyState {
         proxy_state: state.clone(),
         mitm_ca,
-        upstream_hosts,
+        upstream_hosts: Arc::new(built.upstream_hosts),
     };
 
     // Build the router

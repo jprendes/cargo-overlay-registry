@@ -14,11 +14,11 @@ use tokio_rustls::TlsAcceptor;
 use tower::Service;
 
 use crate::endpoints::{handle_internal_request, InternalResponse};
-use crate::state::{MitmCa, ProxyState, RegistryState};
+use crate::state::{GenericProxyState, MitmCa, RegistryState};
 
 /// Shared state for the HTTP proxy functionality
 #[derive(Clone)]
-pub struct HttpProxyState<S: RegistryState + Clone = ProxyState> {
+pub struct HttpProxyState<S: RegistryState + Clone = GenericProxyState> {
     pub proxy_state: Arc<S>,
     pub mitm_ca: Arc<MitmCa>,
     pub upstream_hosts: Arc<Vec<String>>,

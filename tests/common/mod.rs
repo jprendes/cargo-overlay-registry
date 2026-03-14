@@ -77,11 +77,23 @@ pub struct ProxyTestHelper {
 impl ProxyTestHelper {
     /// Create a new proxy test helper with the given test name (used for temp directories).
     pub fn new(test_name: &str) -> Self {
-        Self::with_args(test_name, &[])
+        Self::with_options(test_name, false, &[])
     }
 
     /// Create a new proxy test helper with additional command-line arguments.
     pub fn with_args(test_name: &str, extra_args: &[&str]) -> Self {
+        // Check if permissive publishing is requested (old flag, now handled differently)
+        let permissive = extra_args.contains(&"--permissive-publishing");
+        let extra_args: Vec<&str> = extra_args
+            .iter()
+            .filter(|a| **a != "--permissive-publishing")
+            .copied()
+            .collect();
+        Self::with_options(test_name, permissive, &extra_args)
+    }
+
+    /// Create a new proxy test helper with options.
+    pub fn with_options(test_name: &str, permissive_publishing: bool, extra_args: &[&str]) -> Self {
         let proxy_binary = build_proxy_binary();
 
         // Find available port (same port for registry and HTTP proxy)
@@ -103,13 +115,17 @@ impl ProxyTestHelper {
         let ca_cert_path = temp_path.join(format!("{}-ca-cert.pem", test_name));
 
         // Build args - HTTP proxy is enabled by default
+        // Use the new -r flag for registry specification
+        let registry_arg = format!("local={}", registry_path.to_str().unwrap());
         let mut args = vec![
             "--port",
             &port.to_string(),
             "--host",
             "127.0.0.1",
-            "--registry-path",
-            registry_path.to_str().unwrap(),
+            "-r",
+            &registry_arg,
+            "-r",
+            "crates.io",
             "--ca-cert-out",
             ca_cert_path.to_str().unwrap(),
             "--base-url",
@@ -118,6 +134,10 @@ impl ProxyTestHelper {
         .into_iter()
         .map(String::from)
         .collect::<Vec<_>>();
+
+        if permissive_publishing {
+            args.push("--permissive-publishing".to_string());
+        }
 
         for arg in extra_args {
             args.push(arg.to_string());

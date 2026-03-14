@@ -23,8 +23,11 @@ pub use endpoints::{
     handle_index_2char, handle_index_3char, handle_index_4plus,
 };
 pub use http_proxy::{handle_proxy_connection, HttpProxyState};
-pub use registry::{AnyRegistry, DynRegistry, PublishRegistry, Registry};
-pub use state::{GenericProxyState, MitmCa, ProxyState, PublishProxyState, RegistryState};
+pub use registry::{
+    build_registry, AnyRegistry, BuiltRegistry, DynRegistry, Registry,
+    RegistryBuildOptions, RegistrySpec,
+};
+pub use state::{GenericProxyState, MitmCa, RegistryState};
 pub use tls::generate_self_signed_cert;
 
 /// Build the standard registry router with all endpoints configured.

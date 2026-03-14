@@ -1,7 +1,7 @@
 mod local;
 mod overlay;
-mod publish;
 mod remote;
+mod spec;
 
 use std::fmt;
 use std::future::Future;
@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 pub use local::LocalRegistry;
 pub use overlay::OverlayRegistry;
-pub use publish::PublishRegistry;
+
 pub use remote::RemoteRegistry;
+pub use spec::{build_registry, BuiltRegistry, RegistryBuildOptions, RegistrySpec};
 
 use crate::types::{IndexEntry, PublishMetadata};
 

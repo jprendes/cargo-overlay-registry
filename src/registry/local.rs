@@ -12,6 +12,8 @@ pub struct LocalRegistry {
     pub path: PathBuf,
     /// Whether to validate metadata on publish
     pub validate_metadata: bool,
+    /// Whether this registry is read-only (publish returns NotFound)
+    pub read_only: bool,
 }
 
 impl LocalRegistry {
@@ -19,15 +21,23 @@ impl LocalRegistry {
         Self {
             path,
             validate_metadata,
+            read_only: false,
         }
     }
 
-    /// Get the path to a crate file
+    /// Create a read-only local registry (for tmp-registry during cargo publish)
+    pub fn read_only(path: PathBuf) -> Self {
+        Self {
+            path,
+            validate_metadata: false,
+            read_only: true,
+        }
+    }
+
+    /// Get the path to a crate file.
+    /// Stores crates as `{name}-{version}.crate` directly in the root.
     fn crate_path(&self, crate_name: &str, version: &str) -> PathBuf {
-        self.path
-            .join("crates")
-            .join(crate_name)
-            .join(format!("{}.crate", version))
+        self.path.join(format!("{}-{}.crate", crate_name, version))
     }
 
     /// Get the path to an index file for a crate name
@@ -86,6 +96,11 @@ impl Registry for LocalRegistry {
         metadata: PublishMetadata,
         crate_data: &[u8],
     ) -> Result<String, RegistryError> {
+        // Read-only registries don't support publishing
+        if self.read_only {
+            return Err(RegistryError::NotFound);
+        }
+
         // Validate metadata if enabled
         if self.validate_metadata {
             let errors = metadata.validate();
@@ -99,11 +114,11 @@ impl Registry for LocalRegistry {
         hasher.update(crate_data);
         let checksum = format!("{:x}", hasher.finalize());
 
+        // Ensure registry directory exists
+        tokio::fs::create_dir_all(&self.path).await?;
+
         // Save the .crate file
         let crate_path = self.crate_path(&metadata.name, &metadata.vers);
-        if let Some(parent) = crate_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
         tokio::fs::write(&crate_path, crate_data).await?;
 
         // Create index entry

@@ -36,9 +36,7 @@ fn test_publish_quote_crate() {
     // Verify the crate was stored
     let stored_crate = proxy
         .registry_path
-        .join("crates")
-        .join("quote")
-        .join("99.0.0.crate");
+        .join("quote-99.0.0.crate");
     assert!(
         stored_crate.exists(),
         "Crate file not found in registry at {:?}",
