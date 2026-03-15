@@ -21,8 +21,7 @@ impl std::fmt::Display for RegistrySpec {
                 write!(f, "remote={}", api_url)
             }
             RegistrySpec::Remote { api_url, index_url }
-                if api_url == "https://crates.io"
-                    && index_url == "https://index.crates.io" =>
+                if api_url == "https://crates.io" && index_url == "https://index.crates.io" =>
             {
                 write!(f, "crates.io")
             }
