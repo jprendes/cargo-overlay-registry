@@ -18,8 +18,9 @@ async fn main() {
 
     let args = Args::parse();
 
-    // Determine if TLS is enabled (enabled by default unless --no-tls)
-    let use_tls = !args.no_tls;
+    // Determine if TLS is enabled (enabled by default unless --no-tls or --exec is used)
+    // When executing a command, we use plain HTTP to avoid needing to trust the proxy's cert
+    let use_tls = !args.no_tls && args.exec.is_none();
 
     // Determine if HTTP proxy mode is enabled (enabled by default unless --no-proxy)
     let enable_http_proxy = !args.no_proxy;
@@ -78,7 +79,7 @@ async fn main() {
     ));
 
     // Set up HTTP proxy state if enabled
-    let http_proxy_state = if enable_http_proxy {
+    let (http_proxy_state, cargo_env) = if enable_http_proxy {
         info!("Intercepting hosts: {:?}", built.upstream_hosts);
 
         // Generate MITM CA certificate
@@ -94,31 +95,46 @@ async fn main() {
         info!("Exported CA certificate to {:?}", ca_cert_path);
 
         let protocol = if use_tls { "https" } else { "http" };
-        info!(
-            "Set CARGO_HTTP_PROXY={}://{}:{} to route traffic through proxy",
-            protocol, args.host, args.port
-        );
-        println!(
-            "CARGO_HTTP_PROXY={}://{}:{}/",
-            protocol, args.host, args.port
-        );
+        // Use 127.0.0.1 for client connections when bound to wildcard addresses
+        let connect_host = match args.host.as_str() {
+            "0.0.0.0" => "127.0.0.1",
+            "::" => "::1",
+            h => h,
+        };
+        let proxy_url = format!("{}://{}:{}/", protocol, connect_host, args.port);
         // If user provides their own TLS cert, they should use that for CAINFO
-        let cainfo_path = args.tls_cert.as_ref().unwrap_or(&ca_cert_path);
+        let cainfo_path = args.tls_cert.as_ref().unwrap_or(&ca_cert_path).clone();
+
+        info!(
+            "Set CARGO_HTTP_PROXY={} to route traffic through proxy",
+            proxy_url
+        );
         info!(
             "Set CARGO_HTTP_CAINFO={:?} to trust the proxy's certificates",
             cainfo_path
         );
-        println!("CARGO_HTTP_CAINFO={:?}", cainfo_path);
         info!("Set CARGO_REGISTRY_TOKEN=dummy to enable publishing");
-        println!("CARGO_REGISTRY_TOKEN=dummy");
 
-        Some(HttpProxyState {
+        // Only print env vars to stdout if not executing a command
+        if args.exec.is_none() {
+            println!("CARGO_HTTP_PROXY={}", proxy_url);
+            println!("CARGO_HTTP_CAINFO={:?}", cainfo_path);
+            println!("CARGO_REGISTRY_TOKEN=dummy");
+        }
+
+        let cargo_env = vec![
+            ("CARGO_HTTP_PROXY".to_string(), proxy_url),
+            ("CARGO_HTTP_CAINFO".to_string(), cainfo_path.to_string_lossy().to_string()),
+            ("CARGO_REGISTRY_TOKEN".to_string(), "dummy".to_string()),
+        ];
+
+        (Some(HttpProxyState {
             proxy_state: state.clone(),
             mitm_ca,
             upstream_hosts: Arc::new(built.upstream_hosts),
-        })
+        }), cargo_env)
     } else {
-        None
+        (None, vec![])
     };
 
     let bind_addr = format!("{}:{}", args.host, args.port);
@@ -129,12 +145,73 @@ async fn main() {
     // Build the router
     let app = build_registry_router(state);
 
+    // If --exec is provided, run the command after the server starts
+    if let Some(exec_args) = args.exec {
+        if exec_args.is_empty() {
+            eprintln!("Error: --exec requires a command");
+            std::process::exit(1);
+        }
+
+        // Start the server in the background
+        let server_handle = tokio::spawn(run_server(
+            bind_addr.clone(),
+            app,
+            http_proxy_state,
+            use_tls,
+            args.tls_cert.clone(),
+            args.tls_key.clone(),
+            args.host.clone(),
+        ));
+
+        // Wait for the server to be ready
+        for _ in 0..50 {
+            if tokio::net::TcpStream::connect(&bind_addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        // Run the command with cargo env vars set
+        let status = std::process::Command::new(&exec_args[0])
+            .args(&exec_args[1..])
+            .envs(cargo_env)
+            .status()
+            .expect("Failed to execute command");
+
+        // Abort the server
+        server_handle.abort();
+
+        // Exit with the same exit code
+        std::process::exit(status.code().unwrap_or(1));
+    }
+
     // Server startup with different modes:
     // - TLS + proxy: Custom service over TLS for CONNECT support
     // - TLS only: Simple axum_server TLS
     // - HTTP + proxy: Custom service over plain TCP
     // - HTTP only: Simple axum::serve
 
+    run_server(
+        bind_addr,
+        app,
+        http_proxy_state,
+        use_tls,
+        args.tls_cert,
+        args.tls_key,
+        args.host,
+    )
+    .await;
+}
+
+async fn run_server(
+    bind_addr: String,
+    app: axum::Router,
+    http_proxy_state: Option<HttpProxyState>,
+    use_tls: bool,
+    tls_cert: Option<std::path::PathBuf>,
+    tls_key: Option<std::path::PathBuf>,
+    host: String,
+) {
     if let Some(proxy_state) = http_proxy_state {
         // Proxy mode - use custom service to handle CONNECT and absolute URLs
         let listener = tokio::net::TcpListener::bind(&bind_addr)
@@ -144,7 +221,7 @@ async fn main() {
         let tls_acceptor = if use_tls {
             // TLS with proxy support
             let (cert_pem, key_pem) = if let (Some(cert_path), Some(key_path)) =
-                (&args.tls_cert, &args.tls_key)
+                (&tls_cert, &tls_key)
             {
                 info!("Loading TLS certificate from {:?}", cert_path);
                 info!("Loading TLS key from {:?}", key_path);
@@ -153,7 +230,7 @@ async fn main() {
                 (cert_pem, key_pem)
             } else {
                 info!("Generating self-signed TLS certificate");
-                generate_self_signed_cert(&args.host)
+                generate_self_signed_cert(&host)
                     .expect("Failed to generate self-signed certificate")
             };
 
@@ -189,7 +266,7 @@ async fn main() {
         }
     } else if use_tls {
         // TLS without proxy support - use simple axum_server
-        let tls_config = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key)
+        let tls_config = if let (Some(cert_path), Some(key_path)) = (&tls_cert, &tls_key)
         {
             info!("Loading TLS certificate from {:?}", cert_path);
             info!("Loading TLS key from {:?}", key_path);
@@ -198,7 +275,7 @@ async fn main() {
                 .expect("Failed to load TLS certificate/key")
         } else {
             info!("Generating self-signed TLS certificate");
-            let (cert_pem, key_pem) = generate_self_signed_cert(&args.host)
+            let (cert_pem, key_pem) = generate_self_signed_cert(&host)
                 .expect("Failed to generate self-signed certificate");
             RustlsConfig::from_pem(cert_pem, key_pem)
                 .await

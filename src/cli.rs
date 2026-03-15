@@ -63,6 +63,12 @@ pub struct Args {
     /// (by default, description, license/license-file, valid keywords, etc. are required)
     #[arg(long)]
     pub permissive_publishing: bool,
+
+    /// Execute a command after the proxy is set up, then exit.
+    /// Use -- to separate the command from other arguments.
+    /// Example: cargo-overlay-registry -- cargo publish --allow-dirty
+    #[arg(last = true, num_args = 1..)]
+    pub exec: Option<Vec<String>>,
 }
 
 impl Args {

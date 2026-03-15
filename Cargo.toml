@@ -17,10 +17,6 @@ path = "src/lib.rs"
 name = "cargo-overlay-registry"
 path = "src/main.rs"
 
-[[bin]]
-name = "cargo-publish-dry-run"
-path = "src/bin/cargo-publish-dry-run.rs"
-
 [dependencies]
 axum = "0.8"
 axum-server = { version = "0.7", features = ["tls-rustls"] }

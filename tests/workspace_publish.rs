@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// Build the cargo-publish-dry-run binary (only once per test run)
-fn build_publish_dry_run_binary() -> PathBuf {
+/// Build the cargo-overlay-registry binary (only once per test run)
+fn build_overlay_registry_binary() -> PathBuf {
     static BINARY: OnceLock<PathBuf> = OnceLock::new();
     BINARY
         .get_or_init(|| {
@@ -11,21 +11,21 @@ fn build_publish_dry_run_binary() -> PathBuf {
             let target_dir = manifest_dir.join("target");
 
             let build_output = Command::new("cargo")
-                .args(["build", "--release", "--bin", "cargo-publish-dry-run"])
+                .args(["build", "--release", "--bin", "cargo-overlay-registry"])
                 .current_dir(&manifest_dir)
                 .output()
-                .expect("Failed to build cargo-publish-dry-run");
+                .expect("Failed to build cargo-overlay-registry");
 
             assert!(
                 build_output.status.success(),
-                "Failed to build cargo-publish-dry-run binary: {}",
+                "Failed to build cargo-overlay-registry binary: {}",
                 String::from_utf8_lossy(&build_output.stderr)
             );
 
-            let binary = target_dir.join("release").join("cargo-publish-dry-run");
+            let binary = target_dir.join("release").join("cargo-overlay-registry");
             assert!(
                 binary.exists(),
-                "cargo-publish-dry-run binary not found at {:?}",
+                "cargo-overlay-registry binary not found at {:?}",
                 binary
             );
 
@@ -39,22 +39,27 @@ fn test_workspace_publish() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let example_dir = manifest_dir.join("example");
 
-    let binary = build_publish_dry_run_binary();
+    let binary = build_overlay_registry_binary();
 
     // Use temp dirs to avoid conflicts with other builds and ensure test isolation
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
     let target_dir = temp_dir.path().join("target");
     let cargo_home = temp_dir.path().join("cargo-home");
 
-    // Publish the entire workspace using cargo-publish-dry-run
+    // Publish the entire workspace using cargo-overlay-registry -- cargo publish
     let publish_output = Command::new(&binary)
-        .args(["--workspace", "--allow-dirty"])
+        .args([
+            "-r", &format!("local={}", target_dir.join("package").join("tmp-registry").display()),
+            "-r", "crates.io",
+            "--",
+            "cargo", "publish", "--workspace", "--allow-dirty",
+        ])
         .env("CARGO_TARGET_DIR", &target_dir)
         .env("CARGO_HOME", &cargo_home)
         .env("CARGO_TERM_COLOR", "never")
         .current_dir(&example_dir)
         .output()
-        .expect("Failed to run cargo-publish-dry-run");
+        .expect("Failed to run cargo-overlay-registry");
 
     let stdout = String::from_utf8_lossy(&publish_output.stdout);
     let stderr = String::from_utf8_lossy(&publish_output.stderr);
@@ -64,7 +69,7 @@ fn test_workspace_publish() {
 
     assert!(
         publish_output.status.success(),
-        "cargo-publish-dry-run --workspace failed:\nstdout: {}\nstderr: {}",
+        "cargo-overlay-registry -- cargo publish --workspace failed:\nstdout: {}\nstderr: {}",
         stdout,
         stderr
     );

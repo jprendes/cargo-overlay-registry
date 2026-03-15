@@ -71,37 +71,34 @@ cargo build
 cargo publish --allow-dirty
 ```
 
-## cargo publish-dry-run
+## Quick Publish Test
 
-For quick dry-run testing, use the `cargo-publish-dry-run` binary. It automatically starts a temporary overlay registry, configures cargo, runs `cargo publish`, and cleans up:
+Use `--` to run a command with the proxy already configured:
 
 ```bash
-# Install
-cargo install --path . --bin cargo-publish-dry-run
-
-# Use as a cargo subcommand
-cargo publish-dry-run --allow-dirty
-
-# Or run directly
-cargo-publish-dry-run --allow-dirty
+# Test publishing a single crate
+cargo-overlay-registry -- cargo publish --allow-dirty
 
 # Publish a workspace
-cargo publish-dry-run --workspace --allow-dirty
+cargo-overlay-registry -- cargo publish --workspace --allow-dirty
 ```
 
-All arguments are forwarded to `cargo publish`. Metadata validation is enforced (same as crates.io), so you can verify your crate meets publishing requirements before actually publishing.
+The proxy starts, sets `CARGO_HTTP_PROXY`, `CARGO_HTTP_CAINFO`, and `CARGO_REGISTRY_TOKEN` for the child process, runs the command, and exits with its exit code.
+
+Metadata validation is enforced by default (same as crates.io), so you can verify your crate meets publishing requirements before actually publishing. Use `--permissive-publishing` to skip validation.
 
 ### Build Scripts That Invoke Cargo
 
 When publishing a workspace, `cargo publish` packages each crate to `<target>/package/tmp-registry` before building and validating. If a crate has a build script that invokes `cargo` (e.g., to build another crate or run `cargo metadata`), that inner cargo process needs to resolve dependencies — including workspace crates that were just packaged.
 
-The `cargo-publish-dry-run` binary handles this automatically by layering the tmp-registry. If you're running `cargo-overlay-registry` manually, add a local registry layer pointing to the tmp-registry:
+Add a local registry layer pointing to the tmp-registry:
 
 ```bash
 cargo-overlay-registry \
   -r local=./my-registry \
   -r local=./target/package/tmp-registry \
-  -r crates.io
+  -r crates.io \
+  -- cargo publish --workspace --allow-dirty
 ```
 
 This ensures build scripts can resolve workspace crates that have been packaged but not yet published.
