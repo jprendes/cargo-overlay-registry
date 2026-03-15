@@ -12,6 +12,27 @@ pub enum RegistrySpec {
     Remote { api_url: String, index_url: String },
 }
 
+impl std::fmt::Display for RegistrySpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrySpec::Local { path: None } => write!(f, "local"),
+            RegistrySpec::Local { path: Some(p) } => write!(f, "local={}", p.display()),
+            RegistrySpec::Remote { api_url, index_url } if api_url == index_url => {
+                write!(f, "remote={}", api_url)
+            }
+            RegistrySpec::Remote { api_url, index_url }
+                if api_url == "https://crates.io"
+                    && index_url == "https://index.crates.io" =>
+            {
+                write!(f, "crates.io")
+            }
+            RegistrySpec::Remote { api_url, index_url } => {
+                write!(f, "remote={},{}", api_url, index_url)
+            }
+        }
+    }
+}
+
 impl RegistrySpec {
     /// Shortcut for crates.io remote registry
     pub fn crates_io() -> Self {

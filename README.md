@@ -4,33 +4,38 @@ A read-write overlay layer for cargo registries. Like an overlay filesystem, it 
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────┐
-│            cargo build/publish          │
-└─────────────────┬───────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────┐
-│         Local Registry (writable)       │  ◄── Writes go here
-│    - Stores published crates locally    │
-│    - Merges index with layers below     │
-└─────────────────┬───────────────────────┘
-                  │ (fallback)
-                  ▼
-┌─────────────────────────────────────────┐
-│      Upstream Registry (crates.io)      │  ◄── Read-only
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    cargo["cargo build/publish"]
+    
+    subgraph proxy["cargo-overlay-registry"]
+        direction TB
+        local["Local Registry (writable)"]
+        tmp["tmp-registry (read-only)"]
+        crates["crates.io (read-only)"]
+        
+        local -->|fallback| tmp
+        tmp -->|fallback| crates
+    end
+    
+    cargo -->|HTTP_PROXY| proxy
 ```
 
-- **Publish**: Crates are stored in the local overlay
-- **Download**: Local crates are served first; missing crates fall through to upstream
-- **Index**: Local and upstream indexes are merged transparently
+- **Local Registry**: Receives publishes (`-r local`)
+- **tmp-registry**: Temp registry created by `cargo publish` (`-r local=./target/package/tmp-registry`)
+- **crates.io**: Upstream fallback (`-r crates.io`)
+
+- **Publish**: Crates are stored in the top-most overlay (for local registries only; remote layers are read-only)
+- **Download**: Local crates are served first; missing crates fall through to the next layer
+- **Index**: Indexes from all layers are merged from top to bottom; top layers win conflicts
 
 Multiple registry layers can be stacked using the `-r` flag.
 
 ## Use Case: Dry-Run Publishing
 
-Testing multi-crate publish workflows is challenging — you can't publish crate B that depends on crate A until A is actually on crates.io. The overlay solves this by capturing publishes locally while still resolving real dependencies from upstream.
+Until recently, `cargo publish --workspace` was unstable. Now it's stable — but it still breaks if any crate has a build script that invokes `cargo` (e.g., to run `cargo metadata` or build another crate). The inner cargo process tries to resolve workspace dependencies that haven't been published yet.
+
+The overlay solves this by capturing publishes locally while still resolving real dependencies from upstream. Build scripts see all workspace crates as if they were already published.
 
 ## Installation
 

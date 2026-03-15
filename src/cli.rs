@@ -20,13 +20,15 @@ pub struct Args {
     #[arg(short, long, default_value = "https://crates.io")]
     pub base_url: String,
 
-    /// Registry layers (top to bottom). Examples:
+    /// Registry layers (top to bottom).
+    ///
+    /// Examples:
     ///   -r local              Local registry in temp dir
     ///   -r local=/path        Local registry at path
     ///   -r crates.io          Shortcut for crates.io remote
     ///   -r remote=https://my-registry.com
     ///   -r remote=https://api.com,https://index.com
-    #[arg(short = 'r', long = "registry", value_name = "SPEC")]
+    #[arg(short = 'r', long = "registry", value_name = "SPEC", verbatim_doc_comment, default_values_t = [RegistrySpec::local_temp(), RegistrySpec::crates_io()])]
     pub registries: Vec<RegistrySpec>,
 
     /// Disable proxy mode (CONNECT handling with MITM)
@@ -66,10 +68,6 @@ pub struct Args {
 impl Args {
     /// Get the effective registries, applying defaults if none specified
     pub fn effective_registries(&self) -> Vec<RegistrySpec> {
-        if self.registries.is_empty() {
-            vec![RegistrySpec::local_temp(), RegistrySpec::crates_io()]
-        } else {
-            self.registries.clone()
-        }
+        self.registries.clone()
     }
 }
