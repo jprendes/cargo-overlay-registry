@@ -98,7 +98,10 @@ async fn main() {
             "Set CARGO_HTTP_PROXY={}://{}:{} to route traffic through proxy",
             protocol, args.host, args.port
         );
-        println!("CARGO_HTTP_PROXY={}://{}:{}/", protocol, args.host, args.port);
+        println!(
+            "CARGO_HTTP_PROXY={}://{}:{}/",
+            protocol, args.host, args.port
+        );
         // If user provides their own TLS cert, they should use that for CAINFO
         let cainfo_path = args.tls_cert.as_ref().unwrap_or(&ca_cert_path);
         info!(
