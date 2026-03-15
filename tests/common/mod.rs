@@ -80,6 +80,7 @@ impl ProxyTestHelper {
         Self::with_options(test_name, false, &[])
     }
 
+    #[allow(dead_code)] // not used by all tests, but useful for some
     /// Create a new proxy test helper with additional command-line arguments.
     pub fn with_args(test_name: &str, extra_args: &[&str]) -> Self {
         // Check if permissive publishing is requested (old flag, now handled differently)
